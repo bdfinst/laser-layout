@@ -1,0 +1,151 @@
+# Plan: Laser Layout — Nesting Optimizer for Laser Cutting
+
+**Created**: 2026-03-26
+**Branch**: main
+**Status**: approved
+
+## Goal
+
+Build a Svelte web application that imports LightBurn (.lbrn/.lbrn2) and SVG files, extracts part outlines, and optimizes their placement on a configurable material sheet to minimize waste. Users can set part quantities, configure kerf spacing, preview the nested layout visually, and export the result as SVG or LightBurn format.
+
+## Acceptance Criteria
+
+- [ ] Parses SVG files and extracts part outlines as polygons
+- [ ] Parses LightBurn (.lbrn/.lbrn2) XML files and extracts part outlines as polygons
+- [ ] User can configure material sheet width and height (mm)
+- [ ] User can set quantity per imported part
+- [ ] Kerf/spacing is configurable with 0mm default
+- [ ] Nesting algorithm places parts optimally with free rotation
+- [ ] Visual preview renders nested layout on an SVG canvas
+- [ ] Export to SVG format
+- [ ] Export to LightBurn format
+
+## Steps
+
+### Step 1: Scaffold SvelteKit project with TypeScript and Vitest
+
+**RED**: N/A (scaffolding)
+**GREEN**: Initialize SvelteKit with TypeScript, add Vitest, verify `npm run dev` and `npm test` work
+**REFACTOR**: None needed
+**Files**: `package.json`, `svelte.config.js`, `vite.config.ts`, `tsconfig.json`
+**Commit**: `chore: scaffold SvelteKit project with TypeScript and Vitest`
+
+### Step 2: Geometry core — polygon types and bounding box
+
+**RED**: Write tests for `Polygon` type, `boundingBox()`, `area()`, `translatePolygon()`, `rotatePolygon()`
+**GREEN**: Implement polygon utilities
+**REFACTOR**: Extract shared types to `src/lib/geometry/types.ts`
+**Files**: `src/lib/geometry/types.ts`, `src/lib/geometry/polygon.ts`, `src/lib/geometry/polygon.test.ts`
+**Commit**: `feat: add polygon geometry types and utilities`
+
+### Step 3: SVG parser — extract outlines from SVG files
+
+**RED**: Write tests that parse SVG strings containing `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<path>` and return polygon arrays
+**GREEN**: Implement SVG parser that converts SVG elements to polygons (approximate curves with line segments)
+**REFACTOR**: Extract path-data tokenizer if complex
+**Files**: `src/lib/parsers/svg-parser.ts`, `src/lib/parsers/svg-parser.test.ts`
+**Commit**: `feat: add SVG parser for extracting part outlines`
+
+### Step 4: LightBurn parser — extract outlines from .lbrn files
+
+**RED**: Write tests that parse LightBurn XML strings and return polygon arrays (LightBurn uses `<Shape>` elements with Type attributes like Rect, Ellipse, Path)
+**GREEN**: Implement LightBurn XML parser
+**REFACTOR**: Share curve-approximation logic with SVG parser
+**Files**: `src/lib/parsers/lightburn-parser.ts`, `src/lib/parsers/lightburn-parser.test.ts`
+**Commit**: `feat: add LightBurn file parser for extracting part outlines`
+
+### Step 5: No-Fit Polygon (NFP) computation
+
+**RED**: Write tests for NFP between convex polygon pairs, then concave cases
+**GREEN**: Implement Minkowski-sum-based NFP calculation
+**REFACTOR**: Optimize for common cases (rectangles)
+**Files**: `src/lib/nesting/nfp.ts`, `src/lib/nesting/nfp.test.ts`
+**Commit**: `feat: add no-fit polygon computation`
+
+### Step 6: Bottom-left-fill placement algorithm
+
+**RED**: Write tests: place single part, place two non-overlapping parts, place parts with kerf offset
+**GREEN**: Implement bottom-left-fill using NFP and inner-fit polygon (material boundary)
+**REFACTOR**: None needed
+**Files**: `src/lib/nesting/placement.ts`, `src/lib/nesting/placement.test.ts`
+**Commit**: `feat: add bottom-left-fill placement algorithm`
+
+### Step 7: Genetic algorithm optimizer for rotation search
+
+**RED**: Write tests: GA finds better rotation than 0° for known test case, respects part quantities
+**GREEN**: Implement GA that evolves rotation angles per part, uses placement algorithm as fitness function
+**REFACTOR**: Extract GA primitives (selection, crossover, mutation) for clarity
+**Files**: `src/lib/nesting/optimizer.ts`, `src/lib/nesting/optimizer.test.ts`
+**Commit**: `feat: add genetic algorithm optimizer for rotation search`
+
+### Step 8: Nesting engine — orchestrate the full pipeline
+
+**RED**: Write tests: full pipeline from polygons + material size + quantities → placed parts with positions and rotations
+**GREEN**: Wire together: expand quantities → optimize rotations → place parts → return layout
+**REFACTOR**: Define clean `NestingResult` type
+**Files**: `src/lib/nesting/engine.ts`, `src/lib/nesting/engine.test.ts`
+**Commit**: `feat: add nesting engine orchestrating full optimization pipeline`
+
+### Step 9: SVG exporter
+
+**RED**: Write tests: export placed parts to valid SVG string with correct transforms
+**GREEN**: Implement SVG writer that generates `<svg>` with `<g transform="...">` per part
+**REFACTOR**: None needed
+**Files**: `src/lib/exporters/svg-exporter.ts`, `src/lib/exporters/svg-exporter.test.ts`
+**Commit**: `feat: add SVG exporter for nested layouts`
+
+### Step 10: LightBurn exporter
+
+**RED**: Write tests: export placed parts to valid LightBurn XML
+**GREEN**: Implement LightBurn XML writer
+**REFACTOR**: None needed
+**Files**: `src/lib/exporters/lightburn-exporter.ts`, `src/lib/exporters/lightburn-exporter.test.ts`
+**Commit**: `feat: add LightBurn exporter for nested layouts`
+
+### Step 11: UI — file upload and part list with quantities
+
+**RED**: Write component test: upload file → parts appear in list with quantity inputs
+**GREEN**: Build Svelte components: `FileUpload`, `PartList` with quantity spinners
+**REFACTOR**: Extract shared state to a Svelte store
+**Files**: `src/routes/+page.svelte`, `src/lib/components/FileUpload.svelte`, `src/lib/components/PartList.svelte`, `src/lib/stores/project.ts`
+**Commit**: `feat: add file upload and part list UI`
+
+### Step 12: UI — material settings and kerf configuration
+
+**RED**: Write component test: material dimensions and kerf inputs update store
+**GREEN**: Build `MaterialSettings` component with width, height, kerf inputs
+**REFACTOR**: None needed
+**Files**: `src/lib/components/MaterialSettings.svelte`
+**Commit**: `feat: add material settings and kerf configuration UI`
+
+### Step 13: UI — visual preview of nested layout
+
+**RED**: Write component test: given a nesting result, renders SVG with parts at correct positions
+**GREEN**: Build `LayoutPreview` component that renders placed parts as SVG
+**REFACTOR**: Add zoom/pan if needed
+**Files**: `src/lib/components/LayoutPreview.svelte`
+**Commit**: `feat: add visual layout preview component`
+
+### Step 14: UI — nest button, export controls, and full integration
+
+**RED**: Write integration test: upload file → set material → click nest → see preview → export
+**GREEN**: Wire "Nest" button to engine, add export format selector and download button
+**REFACTOR**: Polish layout, add loading state during optimization
+**Files**: `src/routes/+page.svelte`, `src/lib/components/ExportControls.svelte`
+**Commit**: `feat: integrate nesting pipeline with UI and export controls`
+
+## Pre-PR Quality Gate
+
+- [ ] All tests pass (`npm test`)
+- [ ] Type check passes (`npm run check`)
+- [ ] Linter passes (`npm run lint`)
+- [ ] `/code-review --changed` passes
+- [ ] Application works end-to-end in browser
+
+## Risks & Open Questions
+
+- **NFP for concave polygons is complex** — May need to simplify by convex-decomposing parts first. Can fall back to offset-based collision detection if NFP proves too difficult.
+- **LightBurn format variations** — .lbrn (legacy XML) vs .lbrn2 (newer format) may differ. Need sample files to verify. May need to handle both formats.
+- **Performance** — GA + NFP can be slow for many parts. Consider Web Workers for the optimizer to keep UI responsive.
+- **Curve approximation fidelity** — Converting Bezier curves to line segments requires choosing a tolerance. Too few segments = inaccurate cuts; too many = slow nesting.
+- **Free rotation search space** — Infinite rotation angles make GA search harder. Consider discretizing to e.g. 1° increments for practical performance.
