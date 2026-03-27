@@ -3,7 +3,6 @@
 	import { projectStore } from '$lib/stores/project.svelte';
 	import { exportToSVG } from '$lib/exporters/svg-exporter';
 	import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
-	import type { NestingResult } from '$lib/nesting/engine';
 	import type { WorkerResponse } from '$lib/nesting/nesting-worker';
 
 	let exportFormat = $state<'svg' | 'lightburn'>('svg');

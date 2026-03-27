@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { projectStore, toDisplayUnits } from '$lib/stores/project.svelte';
 	import { getPlacedPolygons, toSVGPathD } from '$lib/geometry/polygon';
-	import type { PlacedPart, SheetResult } from '$lib/geometry/types';
 
 	const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
 
@@ -35,7 +34,7 @@
 		</div>
 
 		<!-- Per-sheet layouts -->
-		{#each result.sheets as sheet, sheetIdx}
+		{#each result.sheets as sheet (sheet.sheetIndex)}
 			<div class="sheet-section">
 				<div class="sheet-header">
 					<span class="sheet-title">Sheet {sheet.sheetIndex + 1}</span>
@@ -55,9 +54,9 @@
 							<line x1="0" y1={sheet.stripHeight} x2={result.sheetWidth} y2={sheet.stripHeight} stroke="#e74c3c" stroke-width="0.3" stroke-dasharray="3,3" />
 						{/if}
 
-						{#each sheet.placed as pp, i}
+						{#each sheet.placed as pp, i (pp.part.id)}
 							{@const polygons = getPlacedPolygons(pp)}
-							{#each polygons as poly}
+							{#each polygons as poly, polyIdx (polyIdx)}
 								<path d={toSVGPathD(poly)} fill="{getColor(i)}22" stroke={getColor(i)} stroke-width="0.5" />
 							{/each}
 						{/each}

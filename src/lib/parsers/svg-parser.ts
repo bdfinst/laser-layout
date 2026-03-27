@@ -123,12 +123,12 @@ function parsePath(d: string): Polygon[] {
 				lastCp = { x: cx + args[0], y: cy + args[1] }; currentPoly.push(...pts); cx += args[2]; cy += args[3]; break;
 			}
 			case 'T': {
-				const cp = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
+				const cp: Point = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
 				const pts = quadraticBezier({ x: cx, y: cy }, cp, { x: args[0], y: args[1] }, CURVE_SEGMENTS);
 				lastCp = cp; currentPoly.push(...pts); cx = args[0]; cy = args[1]; break;
 			}
 			case 't': {
-				const cp = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
+				const cp: Point = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
 				const pts = quadraticBezier({ x: cx, y: cy }, cp, { x: cx + args[0], y: cy + args[1] }, CURVE_SEGMENTS);
 				lastCp = cp; currentPoly.push(...pts); cx += args[0]; cy += args[1]; break;
 			}

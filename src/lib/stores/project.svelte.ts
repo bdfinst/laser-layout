@@ -22,7 +22,7 @@ export interface ProjectState {
 
 const DEFAULT_CONFIG: NestingConfig = {
 	sheet: { width: 300, height: 300 },
-	kerf: 0,
+	kerf: 1,
 	rotationSteps: 72,
 	populationSize: 30,
 	generations: 50

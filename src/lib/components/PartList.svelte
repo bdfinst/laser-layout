@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { projectStore, toDisplayUnits } from '$lib/stores/project.svelte';
 	import { boundingBox, toSVGPathD } from '$lib/geometry/polygon';
-	import type { Part, Polygon } from '$lib/geometry/types';
 
 	function onQuantityChange(partId: string, e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -34,7 +33,7 @@
 	<div class="part-list">
 		<h3>Parts ({totalParts()} total)</h3>
 		<div class="parts">
-			{#each projectStore.state.parts as part}
+			{#each projectStore.state.parts as part (part.id)}
 				{@const bb = boundingBox(part.polygons[0])}
 				<div class="part-row">
 					<div class="thumb">
@@ -44,7 +43,7 @@
 							viewBox={thumbViewBox(bb)}
 							xmlns="http://www.w3.org/2000/svg"
 						>
-							{#each part.polygons as poly}
+							{#each part.polygons as poly, polyIdx (polyIdx)}
 								<path
 									d={toSVGPathD(poly)}
 									fill="#4a90d922"

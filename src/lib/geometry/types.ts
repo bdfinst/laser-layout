@@ -40,7 +40,7 @@ export interface MaterialSheet {
 /** Configuration for the nesting algorithm */
 export interface NestingConfig {
 	sheet: MaterialSheet;
-	kerf: number; // spacing between parts in mm, default 0
+	kerf: number; // spacing between parts in mm, default 1
 	rotationSteps: number; // number of rotation angles to try
 	populationSize: number; // GA population size
 	generations: number; // GA generations

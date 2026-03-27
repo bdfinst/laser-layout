@@ -109,8 +109,74 @@ function minkowskiConvex(A: Polygon, B: Polygon): Polygon {
 	return result;
 }
 
-function ensureCCW(polygon: Polygon): Polygon {
+export function ensureCCW(polygon: Polygon): Polygon {
 	return signedArea(polygon) < 0 ? [...polygon].reverse() : polygon;
+}
+
+/** Compute the inset point for a single vertex along its angle bisector. Returns null if degenerate. */
+function computeBisectorOffset(prev: Point, curr: Point, next: Point, distance: number): Point | null {
+	const e1x = curr.x - prev.x;
+	const e1y = curr.y - prev.y;
+	const e2x = next.x - curr.x;
+	const e2y = next.y - curr.y;
+
+	// Inward normals (for CCW polygon, inward is left-hand: (-dy, dx) normalized)
+	const len1 = Math.sqrt(e1x * e1x + e1y * e1y);
+	const len2 = Math.sqrt(e2x * e2x + e2y * e2y);
+	if (len1 === 0 || len2 === 0) return null;
+
+	const n1x = -e1y / len1;
+	const n1y = e1x / len1;
+	const n2x = -e2y / len2;
+	const n2y = e2x / len2;
+
+	const bx = n1x + n2x;
+	const by = n1y + n2y;
+	const bLen = Math.sqrt(bx * bx + by * by);
+	if (bLen < 1e-10) return null;
+
+	// cos(halfAngle) = dot(bisector_normalized, n1)
+	const cosHalf = (bx * n1x + by * n1y) / bLen;
+	if (Math.abs(cosHalf) < 1e-10) return null;
+
+	const offset = distance / cosHalf;
+	return {
+		x: curr.x + (bx / bLen) * offset,
+		y: curr.y + (by / bLen) * offset
+	};
+}
+
+/**
+ * Shrink a polygon inward by `distance` along each vertex's angle bisector.
+ * Assumes convex polygon. Returns empty array if the polygon collapses.
+ */
+export function insetPolygon(polygon: Polygon, distance: number): Polygon {
+	if (distance === 0) return polygon;
+	const ccw = ensureCCW(polygon);
+	const n = ccw.length;
+	if (n < 3) return [];
+
+	const result: Point[] = [];
+	for (let i = 0; i < n; i++) {
+		const pt = computeBisectorOffset(ccw[(i - 1 + n) % n], ccw[i], ccw[(i + 1) % n], distance);
+		if (pt) result.push(pt);
+	}
+
+	if (result.length < 3) return [];
+
+	// The inset polygon must have strictly smaller absolute area than the original
+	const area = Math.abs(signedArea(result));
+	const originalArea = Math.abs(signedArea(ccw));
+	if (area < 1e-6 || area >= originalArea - 1e-6) return [];
+
+	return result;
+}
+
+/**
+ * Check if all vertices of `inner` are inside `outer`.
+ */
+export function polygonContainsPolygon(outer: Polygon, inner: Polygon): boolean {
+	return inner.every((p) => pointInPolygon(p, outer));
 }
 
 /**

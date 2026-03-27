@@ -56,8 +56,8 @@
 		<div class="field">
 			<label for="units">Units</label>
 			<select id="units" value={projectStore.state.units} onchange={onUnitsChange}>
-				<option value="mm">Millimeters (mm)</option>
-				<option value="in">Inches (in)</option>
+				<option value="mm">mm</option>
+				<option value="in">in</option>
 			</select>
 		</div>
 		<div class="field">

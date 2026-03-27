@@ -109,6 +109,7 @@ export function* nestPartsIterative(
 
 	while (remaining.length > 0) {
 		const gen = optimizeIterative(remaining, config.sheet, config.kerf, optConfig);
+		// eslint-disable-next-line no-useless-assignment
 		let lastPlacement: PlacedPart[] = [];
 
 		let iter: IteratorResult<OptimizeProgress, PlacedPart[]>;

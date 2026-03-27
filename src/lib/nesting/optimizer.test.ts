@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { optimize, optimizeIterative, DEFAULT_OPTIMIZER_CONFIG } from './optimizer';
-import type { Part, MaterialSheet } from '$lib/geometry/types';
+import type { Part } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
 	return {
@@ -67,14 +67,12 @@ describe('optimizeIterative', () => {
 	it('yields one result per generation', () => {
 		const gen = optimizeIterative([makePart('a', 10, 10)], { width: 100, height: 100 }, 0, fastConfig);
 		let count = 0;
-		let lastResult;
 		for (const progress of gen) {
 			expect(progress).toHaveProperty('generation');
 			expect(progress).toHaveProperty('bestFitness');
 			expect(progress).toHaveProperty('bestPlacement');
 			expect(Number.isFinite(progress.bestFitness)).toBe(true);
 			count++;
-			lastResult = progress;
 		}
 		expect(count).toBe(fastConfig.generations);
 	});
