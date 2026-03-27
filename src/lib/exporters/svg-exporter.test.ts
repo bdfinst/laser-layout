@@ -55,9 +55,12 @@ describe('exportToSVG', () => {
 		expect(svg).not.toContain('onload');
 	});
 
-	it('renders rotated parts correctly', () => {
-		const svg = exportToSVG([makePlaced('a', 10, 20, 0, 0, Math.PI / 2)], { sheetWidth: 100, sheetHeight: 100 });
-		expect(svg).toContain('<path');
+	it('renders rotated parts with different coordinates than unrotated', () => {
+		const rotated = exportToSVG([makePlaced('a', 10, 20, 0, 0, Math.PI / 2)], { sheetWidth: 100, sheetHeight: 100 });
+		const unrotated = exportToSVG([makePlaced('a', 10, 20, 0, 0, 0)], { sheetWidth: 100, sheetHeight: 100 });
+		// Extract path d attributes
+		const getD = (svg: string) => svg.match(/d="([^"]+)"/)?.[1] ?? '';
+		expect(getD(rotated)).not.toBe(getD(unrotated));
 	});
 
 	it('renders parts with multiple polygons', () => {

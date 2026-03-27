@@ -123,12 +123,16 @@ test.describe('Part List', () => {
 		await page.locator('#file-input').setInputFiles(FIXTURE);
 		await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
 
+		// Parse initial total from heading like "Parts (15 total)"
+		const initialHeading = await page.locator('.part-list h3').textContent();
+		const initialTotal = parseInt(initialHeading!.match(/\((\d+)/)?.[1] ?? '0');
+
 		await page.locator('.qty input').first().fill('0');
 		await page.locator('.qty input').first().dispatchEvent('change');
 
-		const heading = await page.locator('.part-list h3').textContent();
-		// Total should have decreased
-		expect(heading).toContain('total');
+		const newHeading = await page.locator('.part-list h3').textContent();
+		const newTotal = parseInt(newHeading!.match(/\((\d+)/)?.[1] ?? '0');
+		expect(newTotal).toBeLessThan(initialTotal);
 	});
 
 	test('part sizes shown in selected units', async ({ page }) => {

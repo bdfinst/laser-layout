@@ -63,7 +63,8 @@ function polygonsMatch(a: Polygon, b: Polygon, tolerancePct: number): boolean {
 
 	const areaA = polygonArea(a);
 	const areaB = polygonArea(b);
-	if (Math.abs(areaA - areaB) > tolerance * tolerance) return false;
+	const areaTolerance = Math.max(areaA, areaB) * tolerancePct * 2;
+	if (Math.abs(areaA - areaB) > areaTolerance) return false;
 
 	const normA = a.map((p) => ({ x: p.x - bbA.minX, y: p.y - bbA.minY }));
 	const normB = b.map((p) => ({ x: p.x - bbB.minX, y: p.y - bbB.minY }));

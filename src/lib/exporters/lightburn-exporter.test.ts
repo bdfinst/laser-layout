@@ -58,9 +58,12 @@ describe('exportToLightBurn', () => {
 		expect(xml).not.toContain('evil');
 	});
 
-	it('renders rotated parts', () => {
-		const xml = exportToLightBurn([makePlaced('a', 10, 20, 0, 0, Math.PI / 2)], { sheetWidth: 100, sheetHeight: 100 });
-		expect(xml).toContain('Type="Path"');
+	it('renders rotated parts with different vertices than unrotated', () => {
+		const rotated = exportToLightBurn([makePlaced('a', 10, 20, 0, 0, Math.PI / 2)], { sheetWidth: 100, sheetHeight: 100 });
+		const unrotated = exportToLightBurn([makePlaced('a', 10, 20, 0, 0, 0)], { sheetWidth: 100, sheetHeight: 100 });
+		// Extract VertList content
+		const getVerts = (xml: string) => xml.match(/<VertList>(.*?)<\/VertList>/)?.[1] ?? '';
+		expect(getVerts(rotated)).not.toBe(getVerts(unrotated));
 	});
 
 	it('skips degenerate 2-point polygons', () => {

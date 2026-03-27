@@ -186,6 +186,32 @@ describe('parseSVG', () => {
 		expect(parts[0].polygons).toHaveLength(2);
 	});
 
+	it('parses smooth cubic bezier path (S)', () => {
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg">
+			<path d="M 0 0 C 5 10 15 10 20 0 S 35 -10 40 0"/>
+		</svg>`;
+		const parts = parseSVG(svg);
+		expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+	});
+
+	it('parses smooth quadratic bezier path (T)', () => {
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg">
+			<path d="M 0 0 Q 10 20 20 0 T 40 0"/>
+		</svg>`;
+		const parts = parseSVG(svg);
+		expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+	});
+
+	it('parses relative h and v commands', () => {
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg">
+			<path d="M 0 0 h 50 v 30 h -50 z"/>
+		</svg>`;
+		const parts = parseSVG(svg);
+		expect(parts[0].polygons[0]).toEqual([
+			{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 30 }, { x: 0, y: 30 }
+		]);
+	});
+
 	it('returns empty for SVG with no shapes', () => {
 		const svg = `<svg xmlns="http://www.w3.org/2000/svg"><text>hello</text></svg>`;
 		expect(parseSVG(svg)).toHaveLength(0);
@@ -196,12 +222,13 @@ describe('parseSVG', () => {
 		expect(parseSVG(svg)).toHaveLength(0);
 	});
 
-	it('strips script elements', () => {
+	it('ignores non-shape elements like script', () => {
 		const svg = `<svg xmlns="http://www.w3.org/2000/svg">
 			<script>alert(1)</script>
 			<rect x="0" y="0" width="10" height="10"/>
 		</svg>`;
 		const parts = parseSVG(svg);
+		// Only the rect is extracted — script is structurally ignored by processElement
 		expect(parts).toHaveLength(1);
 	});
 });

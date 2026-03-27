@@ -72,15 +72,17 @@ describe('pointInPolygon', () => {
 		expect(pointInPolygon({ x: 2, y: 2 }, unitSquare)).toBe(false);
 	});
 
-	it('handles point on edge consistently', () => {
-		// Ray casting may return true or false for boundary — just verify no crash
-		const result = pointInPolygon({ x: 0.5, y: 0 }, unitSquare);
-		expect(typeof result).toBe('boolean');
+	it('handles point on edge deterministically', () => {
+		// Ray-casting on boundary is implementation-defined but must be consistent
+		const r1 = pointInPolygon({ x: 0.5, y: 0 }, unitSquare);
+		const r2 = pointInPolygon({ x: 0.5, y: 0 }, unitSquare);
+		expect(r1).toBe(r2);
 	});
 
-	it('handles point on vertex consistently', () => {
-		const result = pointInPolygon({ x: 0, y: 0 }, unitSquare);
-		expect(typeof result).toBe('boolean');
+	it('handles point on vertex deterministically', () => {
+		const r1 = pointInPolygon({ x: 0, y: 0 }, unitSquare);
+		const r2 = pointInPolygon({ x: 0, y: 0 }, unitSquare);
+		expect(r1).toBe(r2);
 	});
 });
 
