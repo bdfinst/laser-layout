@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	IDENTITY, multiplyMatrices, applyMatrix, applyMatrixToPolygon,
 	cubicBezier, quadraticBezier, parseTransformAttr
-} from './affine';
+} from '$lib/geometry/affine';
 
 describe('IDENTITY', () => {
 	it('does not transform a point', () => {

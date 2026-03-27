@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { nestParts, nestPartsIterative, computeMinimumSheet } from './engine';
+import { nestParts, nestPartsIterative, computeMinimumSheet } from '$lib/nesting/engine';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { deduplicateParts } from './dedup';
-import type { Part } from './types';
+import { deduplicateParts } from '$lib/geometry/dedup';
+import type { Part } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number, x = 0, y = 0): Part {
 	return {

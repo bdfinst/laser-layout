@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNFP, computeIFP, pointInPolygon, polygonsOverlap, insetPolygon, polygonContainsPolygon } from './nfp';
+import { computeNFP, computeIFP, pointInPolygon, polygonsOverlap, insetPolygon, polygonContainsPolygon } from '$lib/nesting/nfp';
 import type { Polygon } from '$lib/geometry/types';
 import { boundingBox } from '$lib/geometry/polygon';
 

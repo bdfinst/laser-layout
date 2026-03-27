@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
 	boundingBox, polygonArea, translatePolygon, rotatePolygon,
 	centroid, signedArea, getPlacedPolygons, toSVGPathD
-} from './polygon';
-import type { Polygon, Part, PlacedPart } from './types';
+} from '$lib/geometry/polygon';
+import type { Polygon, Part, PlacedPart } from '$lib/geometry/types';
 
 const square: Polygon = [
 	{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }

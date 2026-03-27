@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLightBurn } from './lightburn-parser';
+import { parseLightBurn } from '$lib/parsers/lightburn-parser';
 import { deduplicateParts } from '$lib/geometry/dedup';
 
 describe('parseLightBurn', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { simplifyPolygon } from './simplify';
-import type { Polygon } from './types';
+import { simplifyPolygon } from '$lib/geometry/simplify';
+import type { Polygon } from '$lib/geometry/types';
 
 describe('simplifyPolygon', () => {
 	it('returns polygon unchanged if <= 3 points', () => {

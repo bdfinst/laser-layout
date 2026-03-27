@@ -57,4 +57,4 @@ This project uses Svelte 5 with runes. Use `$state`, `$derived`, `$effect` — n
 
 ## Test Environment
 
-Unit tests run in jsdom via vitest. Test files are co-located next to their source (`*.test.ts`).
+Unit tests run in jsdom via vitest. Test files live in `test/` mirroring the `src/lib/` structure (e.g., `test/nesting/placement.test.ts` tests `src/lib/nesting/placement.ts`). E2e tests live in `e2e/`.

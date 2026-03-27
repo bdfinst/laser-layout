@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { optimize, optimizeIterative, DEFAULT_OPTIMIZER_CONFIG } from './optimizer';
+import { optimize, optimizeIterative, DEFAULT_OPTIMIZER_CONFIG } from '$lib/nesting/optimizer';
 import type { Part } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {

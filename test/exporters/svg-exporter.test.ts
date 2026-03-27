@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { exportToSVG } from './svg-exporter';
+import { exportToSVG } from '$lib/exporters/svg-exporter';
 import type { Part, PlacedPart } from '$lib/geometry/types';
 
 function makePlaced(id: string, w: number, h: number, x: number, y: number, rotation = 0): PlacedPart {

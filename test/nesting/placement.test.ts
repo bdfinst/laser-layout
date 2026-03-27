@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bottomLeftFill, getStripHeight, calculateUtilization } from './placement';
+import { bottomLeftFill, getStripHeight, calculateUtilization } from '$lib/nesting/placement';
 import type { Part, MaterialSheet } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {

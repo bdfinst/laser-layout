@@ -1,42 +1,45 @@
-# sv
+# Laser Layout
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A nesting optimizer for laser cutting. Upload SVG or LightBurn (.lbrn2) design files, configure material sheet dimensions, and the app packs parts efficiently to minimize waste.
 
-## Creating a project
+![Laser Layout screenshot showing nested parts](static/screenshot.png)
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Features
 
-```sh
-# create a new project
-npx sv create my-app
-```
+- **File import**: SVG and LightBurn (.lbrn2) formats with full path/shape support
+- **Part deduplication**: Automatically identifies geometrically identical parts and tracks quantities
+- **Genetic algorithm optimization**: Evolves rotation angles and placement order across generations
+- **Multi-sheet nesting**: Overflows parts to additional sheets when one sheet fills up
+- **Hole-aware placement**: Places smaller parts inside the cutouts of larger parts
+- **Kerf support**: Configurable spacing between parts (default 1mm)
+- **Live preview**: Real-time visualization of nesting progress via web worker
+- **Export**: Save optimized layouts back to SVG or LightBurn format
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.13.0 create --template minimal --types ts --no-install laser-layout-scaffold
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+## Getting Started
 
 ```sh
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+Open [http://localhost:5173](http://localhost:5173), upload a design file, adjust material settings, and click **Nest Parts**.
 
-To create a production version of your app:
+## Commands
 
 ```sh
-npm run build
+npm run dev          # start dev server
+npm run build        # production build
+npm run preview      # preview production build
+npm run lint         # ESLint
+npm run check        # TypeScript + Svelte type checking
+npm test             # unit tests (vitest)
+npx playwright test  # e2e tests
 ```
 
-You can preview the production build with `npm run preview`.
+## Tech Stack
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+- [SvelteKit](https://svelte.dev) with Svelte 5 runes
+- TypeScript
+- Vitest + Playwright
+- ESLint with TypeScript and Svelte plugins
+- Husky pre-commit hooks (lint + type-check + tests)

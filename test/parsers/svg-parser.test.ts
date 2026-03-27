@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSVG } from './svg-parser';
+import { parseSVG } from '$lib/parsers/svg-parser';
 
 describe('parseSVG', () => {
 	it('parses a rect element', () => {
