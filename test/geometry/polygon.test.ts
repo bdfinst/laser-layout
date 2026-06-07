@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	boundingBox, polygonArea, translatePolygon, rotatePolygon,
-	centroid, signedArea, getPlacedPolygons, toSVGPathD
+	centroid, signedArea, getPlacedPolygons, toSVGPathD, transformPartPolygons
 } from '$lib/geometry/polygon';
 import type { Polygon, Part, PlacedPart } from '$lib/geometry/types';
 
@@ -146,6 +146,41 @@ describe('getPlacedPolygons', () => {
 		], sourceIndex: 0 };
 		const polys = getPlacedPolygons({ part, x: 0, y: 0, rotation: 0 });
 		expect(polys).toHaveLength(2);
+	});
+
+	it('keeps a cutout in its position relative to the outer boundary', () => {
+		// Outer square 0..100, cutout square 20..40 offset (20,20) from the corner.
+		const part: Part = { id: 'a', name: 'a', polygons: [
+			[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }],
+			[{ x: 20, y: 20 }, { x: 40, y: 20 }, { x: 40, y: 40 }, { x: 20, y: 40 }]
+		], sourceIndex: 0 };
+
+		const polys = getPlacedPolygons({ part, x: 200, y: 200, rotation: 0 });
+
+		expect(boundingBox(polys[0]).minX).toBeCloseTo(200);
+		expect(boundingBox(polys[0]).minY).toBeCloseTo(200);
+		const inner = boundingBox(polys[1]);
+		expect(inner.minX).toBeCloseTo(220);
+		expect(inner.minY).toBeCloseTo(220);
+		expect(inner.width).toBeCloseTo(20);
+		expect(inner.height).toBeCloseTo(20);
+	});
+
+	it('rotates a part as a rigid body about a single center', () => {
+		const polygons: Polygon[] = [
+			[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }],
+			[{ x: 10, y: 10 }, { x: 30, y: 10 }, { x: 30, y: 30 }, { x: 10, y: 30 }]
+		];
+
+		const polys = transformPartPolygons(polygons, Math.PI / 2, 200, 200);
+
+		expect(boundingBox(polys[0]).minX).toBeCloseTo(200);
+		expect(boundingBox(polys[0]).minY).toBeCloseTo(200);
+		// Cutout centroid (20,20) rotates 90deg about outer centroid (50,50):
+		// relative (-30,-30) -> (30,-30) -> sheet center (250,250)+(30,-30)=(280,220).
+		const inner = boundingBox(polys[1]);
+		expect((inner.minX + inner.maxX) / 2).toBeCloseTo(280);
+		expect((inner.minY + inner.maxY) / 2).toBeCloseTo(220);
 	});
 });
 

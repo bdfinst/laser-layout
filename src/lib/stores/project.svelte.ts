@@ -1,6 +1,7 @@
 import type { Part, NestingConfig } from '$lib/geometry/types';
 import type { NestingResult } from '$lib/nesting/engine';
 import { deduplicateParts } from '$lib/geometry/dedup';
+import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
 
 export type Units = 'mm' | 'in';
 
@@ -63,7 +64,10 @@ function createProjectStore() {
 		get state() { return state; },
 
 		setParts(rawParts: Part[], fileName: string) {
-			state.rawParts = rawParts;
+			// Clean up overlapping duplicate paths, then group geometrically-
+			// contained shapes into their parent as cutouts, so a shape and its
+			// interior cutouts nest as one part.
+			state.rawParts = groupByContainment(removeCoincidentDuplicates(rawParts));
 			state.fileName = fileName;
 			state.result = null;
 			runDedup();
