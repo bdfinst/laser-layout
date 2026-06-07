@@ -168,9 +168,9 @@ describe('makeOptimizerConfig', () => {
   };
 
   it('defaults omitted convergence fields (A10)', () => {
-    const opt = makeOptimizerConfig(base);
-    // maxGenerations = max(generations, 200)
-    expect(opt.maxGenerations).toBe(200);
+    const opt = makeOptimizerConfig(base); // generations: 50
+    // maxGenerations = max(generations * 3, 120) = max(150, 120) = 150
+    expect(opt.maxGenerations).toBe(150);
     expect(opt.stallWindow).toBe(15);
     expect(opt.stallEpsilon).toBe(0.005);
     // passthrough of existing fields
@@ -179,9 +179,14 @@ describe('makeOptimizerConfig', () => {
     expect(opt.mutationRate).toBe(0.3);
   });
 
-  it('uses generations as the cap baseline when larger than 200', () => {
+  it('scales the cap 3x with generations', () => {
     const opt = makeOptimizerConfig({ ...base, generations: 500 });
-    expect(opt.maxGenerations).toBe(500);
+    expect(opt.maxGenerations).toBe(1500);
+  });
+
+  it('applies the 120 floor for small generation budgets', () => {
+    const opt = makeOptimizerConfig({ ...base, generations: 10 });
+    expect(opt.maxGenerations).toBe(120); // max(30, 120)
   });
 
   it('passes through provided convergence values (A10)', () => {
@@ -200,7 +205,7 @@ describe('makeOptimizerConfig', () => {
     const opt = makeOptimizerConfig({ ...base, stallWindow: 3 });
     expect(opt.stallWindow).toBe(3);
     expect(opt.stallEpsilon).toBe(0.005);
-    expect(opt.maxGenerations).toBe(200);
+    expect(opt.maxGenerations).toBe(150); // base.generations 50 → max(150, 120)
   });
 
   it('produces a terminating optimizer for degenerate configs (A10)', () => {
