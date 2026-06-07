@@ -8,6 +8,7 @@ import {
 import type { BoundingBox } from '$lib/geometry/types';
 import {
   polygonsOverlap,
+  polygonsCloserThan,
   insetPolygon as computeInsetPolygon,
   polygonContainsPolygon,
 } from './nfp';
@@ -228,7 +229,8 @@ function slideBottomLeft(
 
   // Alternate down/left until neither frees further movement (fixed point). A left move
   // can open vertical room and vice-versa, so one pass misses L-shaped pockets (#14).
-  const MAX_ROUNDS = 8;
+  // Most settling happens in the first round or two; cap to bound cost.
+  const MAX_ROUNDS = 3;
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const prevX = cx;
     const prevY = cy;
@@ -253,8 +255,8 @@ function tryAdjacentPositions(
   sheet: MaterialSheet,
   kerf: number,
 ): PlacementResult | null {
-  const candidates: { x: number; y: number; score: number }[] = [];
-
+  // Collect collision-free anchors scored by their pre-slide bottom-left position.
+  const anchors: { x: number; y: number; score: number }[] = [];
   for (const cp of cache) {
     for (const pos of candidateAnchors(cp, partBB, kerf)) {
       if (
@@ -264,18 +266,26 @@ function tryAdjacentPositions(
         pos.y + partBB.height <= sheet.height &&
         !hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)
       ) {
-        // Pull the candidate toward the origin so it settles into any open gap
-        // beneath/left of it that does not raise the strip height.
-        const slid = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
-        candidates.push({ ...slid, score: slid.y * sheet.width + slid.x });
+        anchors.push({ ...pos, score: pos.y * sheet.width + pos.x });
       }
     }
   }
 
-  if (candidates.length === 0) return null;
+  if (anchors.length === 0) return null;
 
-  candidates.sort((a, b) => a.score - b.score);
-  return { position: { x: candidates[0].x, y: candidates[0].y }, hole: null };
+  // Slide only the most promising anchors toward the origin (gap-filling). Sliding is
+  // the expensive step (especially with true-shape kerf collision), so cap how many we
+  // slide rather than sliding every anchor.
+  const SLIDE_BUDGET = 6;
+  anchors.sort((a, b) => a.score - b.score);
+  let best: { x: number; y: number; score: number } | null = null;
+  for (const anchor of anchors.slice(0, SLIDE_BUDGET)) {
+    const slid = slideBottomLeft(normalizedPoly, anchor.x, anchor.y, partBB, cache, sheet, kerf);
+    const score = slid.y * sheet.width + slid.x;
+    if (!best || score < best.score) best = { ...slid, score };
+  }
+
+  return { position: { x: best!.x, y: best!.y }, hole: null };
 }
 
 function tryGridFallback(
@@ -344,11 +354,13 @@ function checkOverlap(
       continue;
     }
 
-    // When kerf > 0, bounding-box overlap (with kerf margin) is treated as collision.
-    // This is an intentional approximation: exact polygon overlap checking with kerf
-    // would require offsetting polygons, which is expensive. The tradeoff is slightly
-    // less dense packing when kerf is non-zero, but much faster placement.
-    if (kerf > 0) return true;
+    // kerf > 0: true-shape spacing — parts may approach until their actual outlines are
+    // `kerf` apart (the bbox test above is only a cheap pre-filter). kerf == 0: exact
+    // overlap. (#11 — replaces the old bbox-overlap approximation for kerf > 0.)
+    if (kerf > 0) {
+      if (polygonsCloserThan(translatedPoly, cp.polygon, kerf)) return true;
+      continue;
+    }
 
     if (polygonsOverlap(translatedPoly, cp.polygon)) {
       return true;

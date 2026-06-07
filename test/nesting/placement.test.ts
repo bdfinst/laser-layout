@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { bottomLeftFill } from '$lib/nesting/placement';
 import { getPlacedPolygons, boundingBox } from '$lib/geometry/polygon';
-import { polygonsOverlap } from '$lib/nesting/nfp';
+import { polygonsOverlap, polygonsCloserThan } from '$lib/nesting/nfp';
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -373,12 +373,12 @@ describe('gap-filling placement', () => {
                 }
               }
             } else {
-              // Every pair of bounding boxes is separated by >= kerf.
-              const ba = boundingBox(getPlacedPolygons(a)[0]);
-              const bb = boundingBox(getPlacedPolygons(b)[0]);
-              const sepX = Math.max(ba.minX - bb.maxX, bb.minX - ba.maxX);
-              const sepY = Math.max(ba.minY - bb.maxY, bb.minY - ba.maxY);
-              expect(Math.max(sepX, sepY)).toBeGreaterThanOrEqual(kerf - 1e-6);
+              // True-shape spacing (#11): outlines must be >= kerf apart. Bounding boxes
+              // may now be closer than kerf (that is the point), so assert on the real
+              // polygon distance, not the bbox.
+              expect(
+                polygonsCloserThan(getPlacedPolygons(a)[0], getPlacedPolygons(b)[0], kerf - 1e-6),
+              ).toBe(false);
             }
           }
         }
