@@ -1,6 +1,23 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
+import { boundingBox } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
 import { openAreaStats } from './stats';
+
+/**
+ * Deterministic "biggest-first" seed orderings for the initial GA population.
+ * Classic bottom-left-fill packs best when large parts are placed first, so seeding
+ * the population with parts sorted by descending bounding-box area and by descending
+ * height gives the GA strong starting points. Returns index permutations (rotation 0).
+ */
+export function heuristicOrders(parts: Part[]): number[][] {
+  const dims = parts.map((p) => boundingBox(p.polygons[0]));
+  const idx = Array.from({ length: parts.length }, (_, i) => i);
+  const byArea = [...idx].sort(
+    (a, b) => dims[b].width * dims[b].height - dims[a].width * dims[a].height,
+  );
+  const byHeight = [...idx].sort((a, b) => dims[b].height - dims[a].height);
+  return [byArea, byHeight];
+}
 
 // Density-aware fitness (lower is better). Feasibility dominates: each unplaced part
 // adds a heavy penalty that always outranks any open-area/strip difference. Open-area
@@ -106,6 +123,19 @@ export function* optimizeIterative(
   };
   noRotation.fitness = evaluate(noRotation, parts, sheet, kerf);
   population[0] = noRotation;
+
+  // Seed a few individuals with biggest-first heuristic orderings (#13).
+  const seeds = heuristicOrders(parts);
+  for (let s = 0; s < seeds.length && s + 1 < config.populationSize; s++) {
+    const seeded: Individual = {
+      rotations: new Array(n).fill(0),
+      order: seeds[s],
+      fitness: 0,
+      placement: [],
+    };
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf);
+    population[s + 1] = seeded;
+  }
 
   // Sort initial population
   population.sort((a, b) => a.fitness - b.fitness);
