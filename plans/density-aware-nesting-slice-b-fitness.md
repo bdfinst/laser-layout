@@ -18,9 +18,9 @@ stays fixed-count on this branch (Slice A owns termination).
 
 ## Acceptance Criteria (this unit)
 
-- [ ] A1 Density objective: pure `openAreaStats`/`fitnessFromStats` rank denser layouts better, true polygon area, finite worst-case fitness on empty placement (no NaN/∞).
-- [ ] A2 Feasibility dominates: any all-placed layout beats any layout with ≥1 unplaced part.
-- [ ] A12 Single source of truth: reported `SheetResult.utilization` == `1 − openAreaRatio` from the same `openAreaStats` the GA minimizes.
+- [x] A1 Density objective: pure `openAreaStats`/`fitnessFromStats` rank denser layouts better, true polygon area, finite worst-case fitness on empty placement (no NaN/∞).
+- [x] A2 Feasibility dominates: any all-placed layout beats any layout with ≥1 unplaced part.
+- [x] A12 Single source of truth: reported `SheetResult.utilization` == `1 − openAreaRatio` from the same `openAreaStats` the GA minimizes.
 
 > **Determinism convention.** The units under test are the **exported pure** helpers `openAreaStats`
 > and `fitnessFromStats` (no GA, no RNG). Any GA-driven assertion uses the seeded LCG fixture (seed 42).
@@ -63,10 +63,10 @@ stays fixed-count on this branch (Slice A owns termination).
 
 ### Steps
 
-- [ ] Slice B: Density-aware fitness via `openAreaStats`
+- [x] Slice B: Density-aware fitness via `openAreaStats`
 
 ### Acceptance Criteria
 
-- [ ] A1 Density objective (pure helpers, true area, finite worst-case fitness)
-- [ ] A2 Feasibility dominates density
-- [ ] A12 Single source of truth (utilization == 1 − openAreaRatio)
+- [x] A1 Density objective (pure helpers, true area, finite worst-case fitness)
+- [x] A2 Feasibility dominates density
+- [x] A12 Single source of truth (utilization == 1 − openAreaRatio)

@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-07
 **Branch**: `feat/density-aware-nesting` (integration base)
-**Status**: approved
+**Status**: in-progress
 **Spec**: `docs/specs/density-aware-nesting.md`
 **Type**: coordinator — owns goal, all acceptance criteria, the shared behavior contract, and the
 merge gate. Each unit is its own plan file with its own Build Progress (see Slices index below).
@@ -23,20 +23,20 @@ point where the combined density win is measured.
 
 ## Acceptance Criteria
 
-- [ ] A1 Density objective: pure `openAreaStats`/`fitnessFromStats` rank denser layouts better, true polygon area, finite worst-case fitness on empty placement (no NaN/∞).
-- [ ] A2 Feasibility dominates: any all-placed layout beats any layout with ≥1 unplaced part.
-- [ ] A3 Gap-fill correctness: kerf=0 → no polygon overlap (bbox overlap allowed); kerf>0 → bbox separation ≥ kerf; all parts inside the sheet.
-- [ ] A4 Gap-fill effectiveness: on a representative fixture under a pinned seed, utilization +≥0.05 absolute vs recorded baseline OR fewer sheets.
-- [ ] A5 Density non-regression: utilization ≥ baseline − 0.01 (baseline under the new true-area metric) and `totalPlaced` never decreases, on every fixture.
-- [ ] A6 Convergence stops early: `hasStalled` returns true on a stalling history; generator terminates at `< maxGenerations`, returns best-so-far.
-- [ ] A7 Safety cap: with convergence disarmed (`stallWindow ≥ maxGenerations`), runs exactly `maxGenerations` generations.
-- [ ] A8 Window guard: `hasStalled` returns false with fewer than `stallWindow + 1` recorded generations (pure unit test).
-- [ ] A9 Progress contract: one `OptimizeProgress` per generation, each with generation/bestFitness/bestPlacement (seeded fixture).
-- [ ] A10 Config threading: new `NestingConfig` fields default, pass-through, and partial-override correctly via `makeOptimizerConfig`; degenerate configs still terminate.
-- [ ] A11 Overflow + kerf preserved: existing multi-sheet overflow and kerf tests still pass.
-- [ ] A12 Single source of truth: reported `SheetResult.utilization` == `1 − openAreaRatio` from the same `openAreaStats` the GA minimizes.
-- [ ] A13 Honest progress display: `LayoutPreview.svelte`/`ExportControls.svelte` no longer divide by `config.generations`.
-- [ ] A14 Full gate green: `npm run lint`, `npm run check`, `npm test` all pass.
+- [x] A1 Density objective: pure `openAreaStats`/`fitnessFromStats` rank denser layouts better, true polygon area, finite worst-case fitness on empty placement (no NaN/∞).
+- [x] A2 Feasibility dominates: any all-placed layout beats any layout with ≥1 unplaced part.
+- [x] A3 Gap-fill correctness: kerf=0 → no polygon overlap (bbox overlap allowed); kerf>0 → bbox separation ≥ kerf; all parts inside the sheet.
+- [x] A4 Gap-fill effectiveness: on a representative fixture under a pinned seed, utilization +≥0.05 absolute vs recorded baseline OR fewer sheets.
+- [x] A5 Density non-regression: utilization ≥ baseline − 0.01 (baseline under the new true-area metric) and `totalPlaced` never decreases, on every fixture.
+- [x] A6 Convergence stops early: `hasStalled` returns true on a stalling history; generator terminates at `< maxGenerations`, returns best-so-far.
+- [x] A7 Safety cap: with convergence disarmed (`stallWindow ≥ maxGenerations`), runs exactly `maxGenerations` generations.
+- [x] A8 Window guard: `hasStalled` returns false with fewer than `stallWindow + 1` recorded generations (pure unit test).
+- [x] A9 Progress contract: one `OptimizeProgress` per generation, each with generation/bestFitness/bestPlacement (seeded fixture).
+- [x] A10 Config threading: new `NestingConfig` fields default, pass-through, and partial-override correctly via `makeOptimizerConfig`; degenerate configs still terminate.
+- [x] A11 Overflow + kerf preserved: existing multi-sheet overflow and kerf tests still pass.
+- [x] A12 Single source of truth: reported `SheetResult.utilization` == `1 − openAreaRatio` from the same `openAreaStats` the GA minimizes.
+- [x] A13 Honest progress display: `LayoutPreview.svelte`/`ExportControls.svelte` no longer divide by `config.generations`.
+- [x] A14 Full gate green: `npm run lint`, `npm run check`, `npm test` all pass.
 
 ## User-Facing Behavior
 
@@ -331,33 +331,33 @@ acceptance flagged one blocker + warnings, all fixed directly in a final pass.
 ### Units (each implemented + green in its own branch/worktree)
 
 - [x] Phase 0: Foundation — `…-phase0-foundation.md`
-- [ ] Slice A: Convergence — `…-slice-a-convergence.md`
-- [ ] Slice B: Density fitness — `…-slice-b-fitness.md`
-- [ ] Slice C: Gap-filling — `…-slice-c-gapfill.md`
-- [ ] Join: UI + capstone — `…-join.md`
+- [x] Slice A: Convergence — `…-slice-a-convergence.md`
+- [x] Slice B: Density fitness — `…-slice-b-fitness.md`
+- [x] Slice C: Gap-filling — `…-slice-c-gapfill.md`
+- [x] Join: UI + capstone — `…-join.md`
 
 ### Merge sequence (full suite green after each)
 
 - [x] Phase 0 → integration base `feat/density-aware-nesting`
-- [ ] Merge Slice A → base
-- [ ] Merge Slice B → base (resolve mechanical `optimizer.ts` overlap with A)
-- [ ] Merge Slice C → base
-- [ ] Join lands on base
+- [x] Merge Slice A → base
+- [x] Merge Slice B → base (resolve mechanical `optimizer.ts` overlap with A)
+- [x] Merge Slice C → base
+- [x] Join lands on base
 - [ ] `/code-review` + Pre-PR gate
 
 ### Acceptance Criteria
 
-- [ ] A1 Density objective (pure helpers, true area, finite worst-case fitness)
-- [ ] A2 Feasibility dominates density
-- [ ] A3 Gap-fill correctness (kerf=0 polygon, kerf>0 bbox separation, inside sheet)
-- [ ] A4 Gap-fill effectiveness (+≥0.05 utilization or fewer sheets, pinned seed)
-- [ ] A5 Density non-regression (≥ baseline − 0.01, totalPlaced not decreased)
-- [ ] A6 Convergence stops early (hasStalled + generator)
-- [ ] A7 Safety cap (convergence disarmed → exactly maxGenerations)
-- [ ] A8 Window guard (pure hasStalled)
-- [ ] A9 Per-generation progress contract
-- [ ] A10 Config threading (defaults, pass-through, partial, degenerate)
-- [ ] A11 Overflow + kerf preserved
-- [ ] A12 Single source of truth (utilization == 1 − openAreaRatio)
-- [ ] A13 Honest progress display (no config.generations denominator)
-- [ ] A14 Full gate green (lint, check, test)
+- [x] A1 Density objective (pure helpers, true area, finite worst-case fitness)
+- [x] A2 Feasibility dominates density
+- [x] A3 Gap-fill correctness (kerf=0 polygon, kerf>0 bbox separation, inside sheet)
+- [x] A4 Gap-fill effectiveness (+≥0.05 utilization or fewer sheets, pinned seed)
+- [x] A5 Density non-regression (≥ baseline − 0.01, totalPlaced not decreased)
+- [x] A6 Convergence stops early (hasStalled + generator)
+- [x] A7 Safety cap (convergence disarmed → exactly maxGenerations)
+- [x] A8 Window guard (pure hasStalled)
+- [x] A9 Per-generation progress contract
+- [x] A10 Config threading (defaults, pass-through, partial, degenerate)
+- [x] A11 Overflow + kerf preserved
+- [x] A12 Single source of truth (utilization == 1 − openAreaRatio)
+- [x] A13 Honest progress display (no config.generations denominator)
+- [x] A14 Full gate green (lint, check, test)

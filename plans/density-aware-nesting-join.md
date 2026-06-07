@@ -15,11 +15,11 @@ density win (A4) and guards non-regression (A5) under a pinned seed, plus a runt
 
 ## Acceptance Criteria (this unit)
 
-- [ ] A4 Gap-fill effectiveness: on a representative fixture under a pinned seed, utilization +≥0.05 absolute vs recorded baseline OR fewer sheets.
-- [ ] A5 Density non-regression: utilization ≥ baseline − 0.01 (baseline under the new true-area metric) and `totalPlaced` never decreases, on every fixture.
-- [ ] A11 Overflow + kerf preserved: existing multi-sheet overflow and kerf tests still pass.
-- [ ] A13 Honest progress display: `LayoutPreview.svelte`/`ExportControls.svelte` no longer divide by `config.generations`.
-- [ ] A14 Full gate green: `npm run lint`, `npm run check`, `npm test` all pass.
+- [x] A4 Gap-fill effectiveness: on a representative fixture under a pinned seed, utilization +≥0.05 absolute vs recorded baseline OR fewer sheets.
+- [x] A5 Density non-regression: utilization ≥ baseline − 0.01 (baseline under the new true-area metric) and `totalPlaced` never decreases, on every fixture.
+- [x] A11 Overflow + kerf preserved: existing multi-sheet overflow and kerf tests still pass.
+- [x] A13 Honest progress display: `LayoutPreview.svelte`/`ExportControls.svelte` no longer divide by `config.generations`.
+- [x] A14 Full gate green: `npm run lint`, `npm run check`, `npm test` all pass.
 
 > **Determinism convention.** The integration capstone wraps its runs in the seeded LCG fixture
 > (seed 42) so recorded baselines are reproducible.
@@ -62,12 +62,12 @@ away.
 
 ### Steps
 
-- [ ] Join: Honest progress UI + effectiveness/non-regression capstone
+- [x] Join: Honest progress UI + effectiveness/non-regression capstone
 
 ### Acceptance Criteria
 
-- [ ] A4 Gap-fill effectiveness (+≥0.05 utilization or fewer sheets, pinned seed)
-- [ ] A5 Density non-regression (≥ baseline − 0.01, totalPlaced not decreased)
-- [ ] A11 Overflow + kerf preserved
-- [ ] A13 Honest progress display (no config.generations denominator)
-- [ ] A14 Full gate green (lint, check, test)
+- [x] A4 Gap-fill effectiveness (+≥0.05 utilization or fewer sheets, pinned seed)
+- [x] A5 Density non-regression (≥ baseline − 0.01, totalPlaced not decreased)
+- [x] A11 Overflow + kerf preserved
+- [x] A13 Honest progress display (no config.generations denominator)
+- [x] A14 Full gate green (lint, check, test)

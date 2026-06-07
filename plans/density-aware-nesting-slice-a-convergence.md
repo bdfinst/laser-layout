@@ -16,11 +16,11 @@ Fitness stays strip-height on this branch (Slice B owns the objective) so the sl
 
 ## Acceptance Criteria (this unit)
 
-- [ ] A6 Convergence stops early: `hasStalled` returns true on a stalling history; generator terminates at `< maxGenerations`, returns best-so-far.
-- [ ] A7 Safety cap: with convergence disarmed (`stallWindow ≥ maxGenerations`), runs exactly `maxGenerations` generations.
-- [ ] A8 Window guard: `hasStalled` returns false with fewer than `stallWindow + 1` recorded generations (pure unit test).
-- [ ] A9 Progress contract: one `OptimizeProgress` per generation, each with generation/bestFitness/bestPlacement (seeded fixture).
-- [ ] A10 Config threading: new fields default, pass-through, and partial-override correctly via `makeOptimizerConfig`; degenerate configs still terminate.
+- [x] A6 Convergence stops early: `hasStalled` returns true on a stalling history; generator terminates at `< maxGenerations`, returns best-so-far.
+- [x] A7 Safety cap: with convergence disarmed (`stallWindow ≥ maxGenerations`), runs exactly `maxGenerations` generations.
+- [x] A8 Window guard: `hasStalled` returns false with fewer than `stallWindow + 1` recorded generations (pure unit test).
+- [x] A9 Progress contract: one `OptimizeProgress` per generation, each with generation/bestFitness/bestPlacement (seeded fixture).
+- [x] A10 Config threading: new fields default, pass-through, and partial-override correctly via `makeOptimizerConfig`; degenerate configs still terminate.
 
 > **Determinism convention.** GA-driven tests reuse the existing seeded-`Math.random` LCG fixture in
 > `test/nesting/optimizer.test.ts:23-34` and `engine.test.ts:31-39` (seed 42). Convergence _logic_ is
@@ -63,12 +63,12 @@ Fitness stays strip-height on this branch (Slice B owns the objective) so the sl
 
 ### Steps
 
-- [ ] Slice A: Convergence-based GA termination + pure `hasStalled`
+- [x] Slice A: Convergence-based GA termination + pure `hasStalled`
 
 ### Acceptance Criteria
 
-- [ ] A6 Convergence stops early
-- [ ] A7 Safety cap (disarmed → exactly maxGenerations)
-- [ ] A8 Window guard (pure hasStalled)
-- [ ] A9 Per-generation progress contract
-- [ ] A10 Config threading (defaults, pass-through, partial, degenerate)
+- [x] A6 Convergence stops early
+- [x] A7 Safety cap (disarmed → exactly maxGenerations)
+- [x] A8 Window guard (pure hasStalled)
+- [x] A9 Per-generation progress contract
+- [x] A10 Config threading (defaults, pass-through, partial, degenerate)

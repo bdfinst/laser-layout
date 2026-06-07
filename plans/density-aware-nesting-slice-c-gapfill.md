@@ -16,7 +16,7 @@ bounding-box corners. Hole/NFP placement remains highest priority; kerf semantic
 
 ## Acceptance Criteria (this unit)
 
-- [ ] A3 Gap-fill correctness: kerf=0 → no polygon overlap (bbox overlap allowed); kerf>0 → bbox separation ≥ kerf; all parts inside the sheet.
+- [x] A3 Gap-fill correctness: kerf=0 → no polygon overlap (bbox overlap allowed); kerf>0 → bbox separation ≥ kerf; all parts inside the sheet.
 
 ## Steps
 
@@ -46,8 +46,8 @@ conscious call.
 
 ### Steps
 
-- [ ] Slice C: Gap-filling placement — interior anchors + bottom-left slide
+- [x] Slice C: Gap-filling placement — interior anchors + bottom-left slide
 
 ### Acceptance Criteria
 
-- [ ] A3 Gap-fill correctness (kerf=0 polygon, kerf>0 bbox separation, inside sheet)
+- [x] A3 Gap-fill correctness (kerf=0 polygon, kerf>0 bbox separation, inside sheet)
