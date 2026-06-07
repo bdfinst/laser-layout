@@ -43,7 +43,11 @@ export interface NestingConfig {
   kerf: number; // spacing between parts in mm, default 1
   rotationSteps: number; // number of rotation angles to try
   populationSize: number; // GA population size
-  generations: number; // GA generations
+  generations: number; // GA generations (baseline for the convergence safety cap)
+  // Convergence-based termination (optional; defaulted in makeOptimizerConfig).
+  stallWindow?: number; // generations without meaningful improvement before stopping
+  stallEpsilon?: number; // minimum relative improvement that counts as progress
+  maxGenerations?: number; // hard safety cap on generations
 }
 
 /** Result for a single sheet within a multi-sheet nesting */

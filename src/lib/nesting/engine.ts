@@ -5,7 +5,7 @@ import {
   type OptimizerConfig,
   type OptimizeProgress,
 } from './optimizer';
-import { computeSheetStats } from './placement';
+import { computeSheetStats } from './stats';
 import { boundingBox } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
 

@@ -1,5 +1,6 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
-import { bottomLeftFill, getStripHeight } from './placement';
+import { bottomLeftFill } from './placement';
+import { getStripHeight } from './stats';
 
 export interface OptimizerConfig {
   populationSize: number;

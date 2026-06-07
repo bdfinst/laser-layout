@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bottomLeftFill, getStripHeight, calculateUtilization } from '$lib/nesting/placement';
+import { bottomLeftFill } from '$lib/nesting/placement';
 import type { Part, MaterialSheet } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -100,28 +100,6 @@ describe('bottomLeftFill', () => {
       rotation: 0,
     }));
     expect(bottomLeftFill(parts, sheet)).toHaveLength(10);
-  });
-});
-
-describe('getStripHeight', () => {
-  it('returns 0 for empty placement', () => {
-    expect(getStripHeight([])).toBe(0);
-  });
-
-  it('returns max Y of placed parts', () => {
-    const placed = bottomLeftFill([{ part: makePart('a', 10, 20), rotation: 0 }], sheet);
-    expect(getStripHeight(placed)).toBeCloseTo(20);
-  });
-
-  it('returns max Y across multiple parts', () => {
-    const placed = bottomLeftFill(
-      [
-        { part: makePart('a', 10, 30), rotation: 0 },
-        { part: makePart('b', 10, 10), rotation: 0 },
-      ],
-      sheet,
-    );
-    expect(getStripHeight(placed)).toBeCloseTo(30);
   });
 });
 
@@ -273,17 +251,5 @@ describe('hole-aware placement', () => {
     expect(result).toHaveLength(2);
     expect(result[0].x).toBeCloseTo(0);
     expect(result[0].y).toBeCloseTo(0);
-  });
-});
-
-describe('calculateUtilization', () => {
-  it('returns 0 for empty placement', () => {
-    expect(calculateUtilization([], sheet)).toBe(0);
-  });
-
-  it('returns correct utilization for known case', () => {
-    const placed = bottomLeftFill([{ part: makePart('a', 50, 50), rotation: 0 }], sheet);
-    // 50*50 part area / (50 strip height * 100 width) = 0.5
-    expect(calculateUtilization(placed, sheet)).toBeCloseTo(0.5);
   });
 });

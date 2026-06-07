@@ -3,7 +3,6 @@ import {
   boundingBox,
   rotatePolygon,
   translatePolygon,
-  getPlacedPolygons,
   transformPartPolygons,
 } from '$lib/geometry/polygon';
 import type { BoundingBox } from '$lib/geometry/types';
@@ -309,48 +308,4 @@ function hasCollision(
   }
 
   return checkOverlap(translated, bb, cache, kerf);
-}
-
-// --- Stats ---
-
-/** Compute strip height and utilization in a single pass */
-export function computeSheetStats(
-  placed: PlacedPart[],
-  sheet: MaterialSheet,
-): { stripHeight: number; utilization: number } {
-  if (placed.length === 0) return { stripHeight: 0, utilization: 0 };
-
-  let maxY = 0;
-  let partsArea = 0;
-
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
-    for (const poly of polys) {
-      const bb = boundingBox(poly);
-      if (bb.maxY > maxY) maxY = bb.maxY;
-      partsArea += bb.width * bb.height;
-    }
-  }
-
-  const usedArea = maxY * sheet.width;
-  const utilization = usedArea === 0 ? 0 : Math.min(1, partsArea / usedArea);
-
-  return { stripHeight: maxY, utilization };
-}
-
-export function calculateUtilization(placed: PlacedPart[], sheet: MaterialSheet): number {
-  return computeSheetStats(placed, sheet).utilization;
-}
-
-export function getStripHeight(placed: PlacedPart[]): number {
-  if (placed.length === 0) return 0;
-  let maxY = 0;
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
-    for (const poly of polys) {
-      const bb = boundingBox(poly);
-      if (bb.maxY > maxY) maxY = bb.maxY;
-    }
-  }
-  return maxY;
 }
