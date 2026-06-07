@@ -1,5 +1,5 @@
 import type { Point, Polygon, Part, PlacedPart, MaterialSheet } from '$lib/geometry/types';
-import { boundingBox, rotatePolygon, translatePolygon, getPlacedPolygons } from '$lib/geometry/polygon';
+import { boundingBox, rotatePolygon, translatePolygon, getPlacedPolygons, transformPartPolygons } from '$lib/geometry/polygon';
 import type { BoundingBox } from '$lib/geometry/types';
 import { polygonsOverlap, insetPolygon as computeInsetPolygon, polygonContainsPolygon } from './nfp';
 
@@ -79,19 +79,13 @@ function extractHoles(
 ): CachedHole[] {
 	if (part.polygons.length <= 1) return [];
 
-	// Compute parent transform once for all holes
-	const parentRotated = rotatePolygon(part.polygons[0], rotation);
-	const parentBB = boundingBox(parentRotated);
+	// Transform the whole part as a rigid body so holes keep their position
+	// relative to the outer boundary (index 0 = outer boundary, 1.. = holes).
+	const placedPolys = transformPartPolygons(part.polygons, rotation, position.x, position.y);
 	const result: CachedHole[] = [];
 
-	for (let i = 1; i < part.polygons.length; i++) {
-		const rotated = rotatePolygon(part.polygons[i], rotation);
-
-		// Transform hole to sheet coordinates: rotate, offset relative to parent's origin, translate
-		const sheetHole = translatePolygon(
-			translatePolygon(rotated, -parentBB.minX, -parentBB.minY),
-			position.x, position.y
-		);
+	for (let i = 1; i < placedPolys.length; i++) {
+		const sheetHole = placedPolys[i];
 		const sheetHoleBB = boundingBox(sheetHole);
 
 		const inset = kerf > 0 ? computeInsetPolygon(sheetHole, kerf) : sheetHole;

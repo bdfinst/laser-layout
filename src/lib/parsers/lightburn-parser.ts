@@ -83,16 +83,44 @@ function buildPolygonFromPrimitives(verts: Vertex[], prims: Primitive[]): Polygo
 	return points;
 }
 
+/**
+ * Build a polygon from a vertex list and the raw PrimList text.
+ *
+ * LightBurn writes explicit `L`/`B` index primitives for most paths, but for
+ * simple closed polylines it emits the shorthand `LineClosed` (or `Line`),
+ * which means "connect every vertex in order". Without handling this, such
+ * shapes parse to zero primitives and get silently dropped.
+ */
+function buildPolygon(verts: Vertex[], primText: string): Polygon {
+	const trimmed = primText.trim();
+	if (trimmed === '' || verts.length === 0) return [];
+
+	// 'LineClosed' / 'Line': straight segments through every vertex in order.
+	if (/^Line/i.test(trimmed)) {
+		const points: Point[] = verts.map((v) => ({ x: v.x, y: v.y }));
+		if (points.length > 1) {
+			const last = points[points.length - 1];
+			const first = points[0];
+			if (Math.abs(last.x - first.x) < 0.001 && Math.abs(last.y - first.y) < 0.001) {
+				points.pop();
+			}
+		}
+		return points;
+	}
+
+	return buildPolygonFromPrimitives(verts, parsePrimList(trimmed));
+}
+
 /** Shared vertex/primitive pool — LightBurn stores geometry in shared pools referenced by ID */
 interface GeometryPool {
 	verts: Map<string, Vertex[]>;
-	prims: Map<string, Primitive[]>;
+	primText: Map<string, string>;
 }
 
 /** Scan the entire document for all VertList/PrimList data, indexed by VertID/PrimID */
 function buildGeometryPool(root: Element): GeometryPool {
 	const verts = new Map<string, Vertex[]>();
-	const prims = new Map<string, Primitive[]>();
+	const primText = new Map<string, string>();
 
 	const shapes = root.querySelectorAll('Shape[Type="Path"]');
 	for (const shape of Array.from(shapes)) {
@@ -109,14 +137,16 @@ function buildGeometryPool(root: Element): GeometryPool {
 			}
 		}
 
+		// Store the raw PrimList text; it may be index primitives or the
+		// 'LineClosed' shorthand, both resolved per-shape against its own verts.
 		if (primId && primListEl?.textContent) {
-			if (!prims.has(primId)) {
-				prims.set(primId, parsePrimList(primListEl.textContent));
+			if (!primText.has(primId)) {
+				primText.set(primId, primListEl.textContent);
 			}
 		}
 	}
 
-	return { verts, prims };
+	return { verts, primText };
 }
 
 function processShape(
@@ -183,11 +213,11 @@ function processShape(
 				? parseVertList(vertListEl.textContent)
 				: (vertId ? pool.verts.get(vertId) ?? [] : []);
 
-			const prims = primListEl?.textContent
-				? parsePrimList(primListEl.textContent)
-				: (primId ? pool.prims.get(primId) ?? [] : []);
+			const primText = primListEl?.textContent
+				? primListEl.textContent
+				: (primId ? pool.primText.get(primId) ?? '' : '');
 
-			const poly = buildPolygonFromPrimitives(verts, prims);
+			const poly = buildPolygon(verts, primText);
 			if (poly.length >= 3) {
 				polygons = [applyMatrixToPolygon(matrix, poly)];
 			}

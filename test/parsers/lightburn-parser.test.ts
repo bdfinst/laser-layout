@@ -61,6 +61,46 @@ describe('parseLightBurn', () => {
 		]);
 	});
 
+	it('parses a Path whose PrimList is the LineClosed shorthand', () => {
+		// LightBurn writes 'LineClosed' instead of explicit L/B primitives for
+		// simple closed polylines — connect every vertex in order, closed.
+		const xml = `<?xml version="1.0" encoding="UTF-8"?>
+		<LightBurnProject AppVersion="1.0" FormatVersion="1">
+			<Shape Type="Path" CutIndex="0" VertID="0" PrimID="0">
+				<XForm>1 0 0 1 0 0</XForm>
+				<VertList>V0 0c0x1c1x1V10 0c0x1c1x1V10 10c0x1c1x1V0 10c0x1c1x1</VertList>
+				<PrimList>LineClosed</PrimList>
+			</Shape>
+		</LightBurnProject>`;
+		const parts = parseLightBurn(xml);
+		expect(parts).toHaveLength(1);
+		expect(parts[0].polygons[0]).toEqual([
+			{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }
+		]);
+	});
+
+	it('resolves a shared LineClosed PrimList from the geometry pool', () => {
+		// Many shapes share one PrimID="5" => 'LineClosed' while each carries its
+		// own VertList. The pooled LineClosed must apply to each shape's own verts.
+		const xml = `<?xml version="1.0" encoding="UTF-8"?>
+		<LightBurnProject AppVersion="1.0" FormatVersion="1">
+			<Shape Type="Path" CutIndex="0" VertID="1" PrimID="5">
+				<XForm>1 0 0 1 0 0</XForm>
+				<VertList>V0 0c0x1c1x1V4 0c0x1c1x1V4 4c0x1c1x1V0 4c0x1c1x1</VertList>
+				<PrimList>LineClosed</PrimList>
+			</Shape>
+			<Shape Type="Path" CutIndex="0" VertID="2" PrimID="5">
+				<XForm>1 0 0 1 0 0</XForm>
+				<VertList>V20 20c0x1c1x1V26 20c0x1c1x1V26 26c0x1c1x1V20 26c0x1c1x1</VertList>
+			</Shape>
+		</LightBurnProject>`;
+		const parts = parseLightBurn(xml);
+		expect(parts).toHaveLength(2);
+		expect(parts[1].polygons[0]).toEqual([
+			{ x: 20, y: 20 }, { x: 26, y: 20 }, { x: 26, y: 26 }, { x: 20, y: 26 }
+		]);
+	});
+
 	it('applies XForm transform', () => {
 		const xml = `<?xml version="1.0" encoding="UTF-8"?>
 		<LightBurnProject AppVersion="1.0" FormatVersion="1">
@@ -125,6 +165,23 @@ describe('parseLightBurn', () => {
 		expect(parts.length).toBeGreaterThanOrEqual(10);
 
 		// Every part should have valid polygons
+		for (const part of parts) {
+			expect(part.polygons.length).toBeGreaterThan(0);
+			for (const poly of part.polygons) {
+				expect(poly.length).toBeGreaterThanOrEqual(3);
+			}
+		}
+	});
+
+	it('parses every shape in the Lego shelves fixture (LineClosed cutouts)', async () => {
+		const fs = await import('fs');
+		const path = await import('path');
+		const fixturePath = path.resolve('test-fixtures/lego-shelves.lbrn2');
+		const xml = fs.readFileSync(fixturePath, 'utf-8');
+		const parts = parseLightBurn(xml);
+
+		// The file contains 54 Path shapes; none should be silently dropped.
+		expect(parts.length).toBe(54);
 		for (const part of parts) {
 			expect(part.polygons.length).toBeGreaterThan(0);
 			for (const poly of part.polygons) {

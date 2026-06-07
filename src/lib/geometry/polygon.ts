@@ -86,14 +86,31 @@ export function rotatePolygon(polygon: Polygon, angle: number, center?: Point): 
 	});
 }
 
-/** Get the transformed polygons for a placed part (rotate, normalize, translate) */
+/**
+ * Transform a part's polygons as a single rigid body: rotate every polygon
+ * around the *outer* boundary's centroid, then translate the whole group so the
+ * outer boundary's bounding box sits at (x, y). This keeps inner cutouts in
+ * their correct position relative to the outer boundary through rotation and
+ * placement. `polygons[0]` is the outer boundary; the rest are cutouts.
+ */
+export function transformPartPolygons(
+	polygons: Polygon[],
+	rotation: number,
+	x: number,
+	y: number
+): Polygon[] {
+	if (polygons.length === 0) return [];
+	const center = centroid(polygons[0]);
+	const rotated = polygons.map((poly) => rotatePolygon(poly, rotation, center));
+	const outerBB = boundingBox(rotated[0]);
+	const dx = x - outerBB.minX;
+	const dy = y - outerBB.minY;
+	return rotated.map((poly) => translatePolygon(poly, dx, dy));
+}
+
+/** Get the transformed polygons for a placed part (rigid-body rotate + place) */
 export function getPlacedPolygons(pp: PlacedPart): Polygon[] {
-	return pp.part.polygons.map((poly) => {
-		const rotated = rotatePolygon(poly, pp.rotation);
-		const bb = boundingBox(rotated);
-		const normalized = translatePolygon(rotated, -bb.minX, -bb.minY);
-		return translatePolygon(normalized, pp.x, pp.y);
-	});
+	return transformPartPolygons(pp.part.polygons, pp.rotation, pp.x, pp.y);
 }
 
 /** Convert a polygon to an SVG path d attribute string */
