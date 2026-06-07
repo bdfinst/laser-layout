@@ -226,13 +226,21 @@ function slideBottomLeft(
   let cx = x;
   let cy = y;
 
-  let i = 0;
-  while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
-    cy -= step;
-  }
-  i = 0;
-  while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
-    cx -= step;
+  // Alternate down/left until neither frees further movement (fixed point). A left move
+  // can open vertical room and vice-versa, so one pass misses L-shaped pockets (#14).
+  const MAX_ROUNDS = 8;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const prevX = cx;
+    const prevY = cy;
+    let i = 0;
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
+      cy -= step;
+    }
+    i = 0;
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
+      cx -= step;
+    }
+    if (cx === prevX && cy === prevY) break; // converged
   }
 
   return { x: cx, y: cy };
