@@ -51,11 +51,11 @@ the GA loop, `evaluate`, and placement untouched.
 
 ### Steps
 
-- [ ] Phase 0: Foundation — extract `stats.ts` + scaffold convergence config fields
+- [x] Phase 0: Foundation — extract `stats.ts` + scaffold convergence config fields
 
 ### Acceptance Criteria
 
-- [ ] F1 stats.ts extracted unchanged + stats.test.ts re-asserts identical numbers
-- [ ] F2 imports repointed directly, no re-exports
-- [ ] F3 NestingConfig optional convergence fields declared (unused)
-- [ ] F4 suite + typecheck + lint green, behavior unchanged
+- [x] F1 stats.ts extracted unchanged + stats.test.ts re-asserts identical numbers
+- [x] F2 imports repointed directly, no re-exports
+- [x] F3 NestingConfig optional convergence fields declared (unused)
+- [x] F4 suite + typecheck + lint green, behavior unchanged

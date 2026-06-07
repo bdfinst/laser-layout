@@ -330,7 +330,7 @@ acceptance flagged one blocker + warnings, all fixed directly in a final pass.
 
 ### Units (each implemented + green in its own branch/worktree)
 
-- [ ] Phase 0: Foundation — `…-phase0-foundation.md`
+- [x] Phase 0: Foundation — `…-phase0-foundation.md`
 - [ ] Slice A: Convergence — `…-slice-a-convergence.md`
 - [ ] Slice B: Density fitness — `…-slice-b-fitness.md`
 - [ ] Slice C: Gap-filling — `…-slice-c-gapfill.md`
@@ -338,7 +338,7 @@ acceptance flagged one blocker + warnings, all fixed directly in a final pass.
 
 ### Merge sequence (full suite green after each)
 
-- [ ] Phase 0 → integration base `feat/density-aware-nesting`
+- [x] Phase 0 → integration base `feat/density-aware-nesting`
 - [ ] Merge Slice A → base
 - [ ] Merge Slice B → base (resolve mechanical `optimizer.ts` overlap with A)
 - [ ] Merge Slice C → base
