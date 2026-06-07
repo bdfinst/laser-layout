@@ -26,7 +26,7 @@ measured by `npm run bench` (the committed benchmark is the acceptance instrumen
 
 ---
 
-## Slice 1 — True-shape collision for kerf > 0  (impact: HIGH, effort: MEDIUM)
+## Slice 1 — True-shape collision for kerf > 0 (impact: HIGH, effort: MEDIUM)
 
 ### Intent
 
@@ -72,7 +72,7 @@ Scenario: Kerf spacing is still honored exactly
 
 ---
 
-## Slice 2 — Non-convex No-Fit-Polygon placement  (impact: HIGHEST, effort: HIGH)
+## Slice 2 — Non-convex No-Fit-Polygon placement (impact: HIGHEST, effort: HIGH)
 
 ### Intent
 
@@ -110,7 +110,7 @@ Scenario: A concave part nests into another part's concavity
 
 ---
 
-## Slice 3 — Heuristic GA seeding (area / height descending)  (impact: MEDIUM, effort: LOW)
+## Slice 3 — Heuristic GA seeding (area / height descending) (impact: MEDIUM, effort: LOW)
 
 ### Intent
 
@@ -143,7 +143,7 @@ Scenario: The initial population contains a biggest-first ordering
 
 ---
 
-## Slice 4 — Iterate the bottom-left slide to a fixed point  (impact: MEDIUM, effort: LOW)
+## Slice 4 — Iterate the bottom-left slide to a fixed point (impact: MEDIUM, effort: LOW)
 
 ### Intent
 
@@ -173,7 +173,7 @@ Scenario: A part settles to the bottom-left fixed point
 
 ---
 
-## Slice 5 — Mirror / reflection orientations  (impact: MEDIUM, effort: MEDIUM)
+## Slice 5 — Mirror / reflection orientations (impact: MEDIUM, effort: MEDIUM)
 
 ### Intent
 
@@ -210,7 +210,7 @@ Scenario: Mirroring never creates an overlap
 
 ---
 
-## Slice 6 — Global multi-sheet assignment (reduce sheet count)  (impact: HIGH on material, effort: MEDIUM-HIGH)
+## Slice 6 — Global multi-sheet assignment (reduce sheet count) (impact: HIGH on material, effort: MEDIUM-HIGH)
 
 ### Intent
 
@@ -258,6 +258,6 @@ Scenario: Per-generation progress is still reported
 - **Shape-aware unlock (1 → 2)**: land Slice 1 (true-shape kerf) before Slice 2 (non-convex NFP);
   they share geometry and 2 builds on 1. This is where the balloon's 0.44 `trueFill` ceiling lifts.
 - **Slice 6** is orthogonal and targets sheet count directly (the real material saving).
-- The already-shipped **density fitness** (`fitnessFromStats`) tested neutral *because* placement is
+- The already-shipped **density fitness** (`fitnessFromStats`) tested neutral _because_ placement is
   shape-blind; Slices 1–2 are what let a density objective actually pay off.
 - Each slice's acceptance is the benchmark delta — record before/after `npm run bench` in the PR.

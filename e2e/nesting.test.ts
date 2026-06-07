@@ -59,16 +59,16 @@ test.describe('Material Settings', () => {
 
   test('changing units converts values', async ({ page }) => {
     await page.goto('/');
-    // Default is 300mm
+    // Default is 762mm (30 in)
     const widthInput = page.locator('#sheet-width');
     const mmVal = parseFloat(await widthInput.inputValue());
-    expect(mmVal).toBe(300);
+    expect(mmVal).toBe(762);
 
     // Switch to inches
     await page.locator('#units').selectOption('in');
     const inVal = parseFloat(await widthInput.inputValue());
-    // 300mm ≈ 11.81in
-    expect(inVal).toBeCloseTo(11.81, 1);
+    // 762mm = 30in
+    expect(inVal).toBeCloseTo(30, 1);
   });
 
   test('entering inch value stores correct mm internally', async ({ page }) => {
