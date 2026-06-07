@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { nestParts, nestPartsIterative, computeMinimumSheet } from '$lib/nesting/engine';
+import {
+  nestParts,
+  nestPartsIterative,
+  computeMinimumSheet,
+  makeOptimizerConfig,
+} from '$lib/nesting/engine';
+import { optimizeIterative } from '$lib/nesting/optimizer';
+import { computeSheetStats, openAreaStats } from '$lib/nesting/stats';
+import { bottomLeftFill } from '$lib/nesting/placement';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -24,6 +32,10 @@ const fastConfig: NestingConfig = {
   rotationSteps: 4,
   populationSize: 5,
   generations: 3,
+  // Pin a small cap with convergence disarmed so fixed-count assertions hold.
+  maxGenerations: 3,
+  stallWindow: 3,
+  stallEpsilon: 0.005,
 };
 
 let origRandom: () => number;
@@ -44,6 +56,18 @@ describe('nestParts', () => {
     const result = nestParts({ parts: [], quantities: new Map(), config: fastConfig });
     expect(result.sheets).toHaveLength(0);
     expect(result.totalPlaced).toBe(0);
+  });
+
+  it('returns parts as unplaced when nothing fits on the sheet', () => {
+    // 200x200 part on the 100x100 fastConfig sheet — cannot be placed.
+    const result = nestParts({
+      parts: [makePart('huge', 200, 200)],
+      quantities: new Map([['huge', 1]]),
+      config: fastConfig,
+    });
+    expect(result.sheets).toHaveLength(0);
+    expect(result.totalPlaced).toBe(0);
+    expect(result.unplaced).toHaveLength(1);
   });
 
   it('nests a single part on one sheet', () => {
@@ -131,6 +155,98 @@ describe('nestPartsIterative', () => {
     } while (!iter.done);
     expect(iter.value.sheets).toHaveLength(1);
     expect(iter.value.totalPlaced).toBe(1);
+  });
+});
+
+describe('makeOptimizerConfig', () => {
+  const base: NestingConfig = {
+    sheet: { width: 100, height: 100 },
+    kerf: 0,
+    rotationSteps: 8,
+    populationSize: 20,
+    generations: 50,
+  };
+
+  it('defaults omitted convergence fields (A10)', () => {
+    const opt = makeOptimizerConfig(base); // generations: 50
+    // maxGenerations = max(generations * 3, 120) = max(150, 120) = 150
+    expect(opt.maxGenerations).toBe(150);
+    expect(opt.stallWindow).toBe(15);
+    expect(opt.stallEpsilon).toBe(0.005);
+    // passthrough of existing fields
+    expect(opt.populationSize).toBe(20);
+    expect(opt.rotationSteps).toBe(8);
+    expect(opt.mutationRate).toBe(0.3);
+  });
+
+  it('scales the cap 3x with generations', () => {
+    const opt = makeOptimizerConfig({ ...base, generations: 500 });
+    expect(opt.maxGenerations).toBe(1500);
+  });
+
+  it('applies the 120 floor for small generation budgets', () => {
+    const opt = makeOptimizerConfig({ ...base, generations: 10 });
+    expect(opt.maxGenerations).toBe(120); // max(30, 120)
+  });
+
+  it('passes through provided convergence values (A10)', () => {
+    const opt = makeOptimizerConfig({
+      ...base,
+      stallWindow: 7,
+      stallEpsilon: 0.02,
+      maxGenerations: 123,
+    });
+    expect(opt.maxGenerations).toBe(123);
+    expect(opt.stallWindow).toBe(7);
+    expect(opt.stallEpsilon).toBe(0.02);
+  });
+
+  it('handles partial overrides (A10)', () => {
+    const opt = makeOptimizerConfig({ ...base, stallWindow: 3 });
+    expect(opt.stallWindow).toBe(3);
+    expect(opt.stallEpsilon).toBe(0.005);
+    expect(opt.maxGenerations).toBe(150); // base.generations 50 → max(150, 120)
+  });
+
+  it('produces a terminating optimizer for degenerate configs (A10)', () => {
+    const parts = [makePart('a', 5, 5), makePart('b', 5, 5)];
+    const sheet = { width: 100, height: 100 };
+    const degenerates: NestingConfig[] = [
+      { ...base, generations: 5, stallWindow: 0, maxGenerations: 5 },
+      { ...base, generations: 5, stallWindow: 1, maxGenerations: 5 },
+      { ...base, generations: 5, stallWindow: 99, maxGenerations: 5 },
+      { ...base, generations: 5, stallEpsilon: 0, maxGenerations: 5 },
+      { ...base, generations: 5, stallEpsilon: -1, maxGenerations: 5 },
+    ];
+    for (const cfg of degenerates) {
+      const opt = makeOptimizerConfig(cfg);
+      const gen = optimizeIterative(parts, sheet, 0, opt);
+      let count = 0;
+      let iter;
+      do {
+        iter = gen.next();
+        if (!iter.done) count++;
+      } while (!iter.done);
+      // Always terminates within maxGenerations and yields at least one progress value.
+      expect(count).toBeGreaterThanOrEqual(1);
+      expect(count).toBeLessThanOrEqual(opt.maxGenerations);
+    }
+  });
+});
+
+describe('single source of truth (A12)', () => {
+  it('computeSheetStats utilization equals 1 - openAreaStats openAreaRatio', () => {
+    const sheet = fastConfig.sheet;
+    const placed = bottomLeftFill(
+      [
+        { part: makePart('a', 50, 50), rotation: 0 },
+        { part: makePart('b', 20, 20), rotation: 0 },
+      ],
+      sheet,
+    );
+    const computed = computeSheetStats(placed, sheet);
+    const area = openAreaStats(placed, sheet);
+    expect(computed.utilization).toBeCloseTo(1 - area.openAreaRatio);
   });
 });
 

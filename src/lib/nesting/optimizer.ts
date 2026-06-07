@@ -1,24 +1,68 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
-import { bottomLeftFill, getStripHeight } from './placement';
+import { bottomLeftFill } from './placement';
+import { openAreaStats } from './stats';
+
+// Density-aware fitness (lower is better). Feasibility dominates: each unplaced part
+// adds a heavy penalty that always outranks any open-area/strip difference. Open-area
+// ratio (in [0,1]) is the primary in-region objective; strip height is a tiny tiebreaker.
+export const PENALTY_PER_UNPLACED = 1000;
+export const STRIP_TIEBREAK = 1e-3;
+
+export function fitnessFromStats(
+  stats: { openAreaRatio: number; stripHeight: number },
+  unplacedCount: number,
+  sheetHeight: number,
+): number {
+  return (
+    unplacedCount * PENALTY_PER_UNPLACED +
+    stats.openAreaRatio +
+    STRIP_TIEBREAK * (sheetHeight > 0 ? stats.stripHeight / sheetHeight : 0)
+  );
+}
 
 export interface OptimizerConfig {
   populationSize: number;
-  generations: number;
+  maxGenerations: number; // hard safety cap on generations
+  stallWindow: number; // generations without meaningful improvement before stopping
+  stallEpsilon: number; // minimum relative improvement that counts as progress
   mutationRate: number;
   rotationSteps: number; // e.g. 360 means 1° increments
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
   populationSize: 30,
-  generations: 50,
   mutationRate: 0.3,
   rotationSteps: 72, // 5° increments
+  maxGenerations: 200,
+  stallWindow: 15,
+  stallEpsilon: 0.005,
 };
+
+/**
+ * Pure convergence check. Returns true when the best fitness has not improved
+ * by at least `epsilon` (relative) over the last `window` generations.
+ * Lower fitness is better. Deterministic — no GA, no RNG.
+ */
+export function hasStalled(history: number[], window: number, epsilon: number): boolean {
+  if (history.length < window + 1) return false; // window guard (A8)
+  const prev = history[history.length - 1 - window];
+  const curr = history[history.length - 1];
+  const denom = Math.max(Math.abs(prev), 1e-9); // divide-by-zero guard (A6)
+  return (prev - curr) / denom < epsilon; // lower fitness is better
+}
 
 interface Individual {
   rotations: number[]; // rotation angle in radians for each part
   order: number[]; // placement order (indices into parts array)
-  fitness: number; // lower is better (strip height)
+  fitness: number; // lower is better (open-area ratio + unplaced penalty)
+  placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
+}
+
+function toOrderedParts(individual: Individual, parts: Part[]): { part: Part; rotation: number }[] {
+  return individual.order.map((idx, i) => ({
+    part: parts[idx],
+    rotation: individual.rotations[i],
+  }));
 }
 
 export interface OptimizeProgress {
@@ -58,6 +102,7 @@ export function* optimizeIterative(
     rotations: new Array(n).fill(0),
     order: Array.from({ length: n }, (_, i) => i),
     fitness: 0,
+    placement: [],
   };
   noRotation.fitness = evaluate(noRotation, parts, sheet, kerf);
   population[0] = noRotation;
@@ -65,8 +110,9 @@ export function* optimizeIterative(
   // Sort initial population
   population.sort((a, b) => a.fitness - b.fitness);
 
-  // Evolve
-  for (let gen = 0; gen < config.generations; gen++) {
+  // Evolve, stopping early when best fitness converges (bounded by the safety cap).
+  const history: number[] = [];
+  for (let gen = 0; gen < config.maxGenerations; gen++) {
     const nextGen: Individual[] = [];
 
     // Elitism: keep top 10% (population is already sorted)
@@ -93,12 +139,15 @@ export function* optimizeIterative(
     population.sort((a, b) => a.fitness - b.fitness);
 
     const best = population[0];
-    const bestPlacement = placementFromIndividual(best, parts, sheet, kerf);
-    yield { generation: gen, bestFitness: best.fitness, bestPlacement };
+    // best.placement was cached by evaluate() — no need to re-run bottomLeftFill here.
+    yield { generation: gen, bestFitness: best.fitness, bestPlacement: best.placement };
+
+    history.push(best.fitness);
+    if (hasStalled(history, config.stallWindow, config.stallEpsilon)) break;
   }
 
   // Population is already sorted from the last iteration
-  return placementFromIndividual(population[0], parts, sheet, kerf);
+  return population[0].placement;
 }
 
 /**
@@ -122,19 +171,6 @@ export function optimize(
   return last.value;
 }
 
-function placementFromIndividual(
-  individual: Individual,
-  parts: Part[],
-  sheet: MaterialSheet,
-  kerf: number,
-): PlacedPart[] {
-  const orderedParts = individual.order.map((idx, i) => ({
-    part: parts[idx],
-    rotation: individual.rotations[i],
-  }));
-  return bottomLeftFill(orderedParts, sheet, kerf);
-}
-
 function createRandomIndividual(n: number, angleStep: number, rotationSteps: number): Individual {
   const rotations: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -149,7 +185,7 @@ function createRandomIndividual(n: number, angleStep: number, rotationSteps: num
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }
 
 function evaluate(
@@ -158,17 +194,12 @@ function evaluate(
   sheet: MaterialSheet,
   kerf: number,
 ): number {
-  const orderedParts = individual.order.map((idx, i) => ({
-    part: parts[idx],
-    rotation: individual.rotations[i],
-  }));
+  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf);
+  individual.placement = placed; // cache for progress reporting / final return
+  const stats = openAreaStats(placed, sheet);
+  const unplacedCount = parts.length - placed.length;
 
-  const placed = bottomLeftFill(orderedParts, sheet, kerf);
-
-  // Penalize unplaced parts heavily
-  const unplacedPenalty = (parts.length - placed.length) * sheet.height;
-
-  return getStripHeight(placed) + unplacedPenalty;
+  return fitnessFromStats(stats, unplacedCount, sheet.height);
 }
 
 function tournamentSelect(population: Individual[], size: number = 3): Individual {
@@ -191,7 +222,7 @@ function crossover(parent1: Individual, parent2: Individual, n: number): Individ
   // Order crossover (OX) for placement order
   const order = orderCrossover(parent1.order, parent2.order, n);
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }
 
 function orderCrossover(p1: number[], p2: number[], n: number): number[] {
@@ -238,5 +269,5 @@ function mutate(individual: Individual, angleStep: number, rotationSteps: number
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }

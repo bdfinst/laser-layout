@@ -5,7 +5,7 @@ import {
   type OptimizerConfig,
   type OptimizeProgress,
 } from './optimizer';
-import { computeSheetStats } from './placement';
+import { computeSheetStats } from './stats';
 import { boundingBox } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
 
@@ -56,12 +56,17 @@ function simplifyPartsForNesting(parts: Part[]): Part[] {
   }));
 }
 
-function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
+export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
   return {
     populationSize: config.populationSize,
-    generations: config.generations,
-    mutationRate: 0.3,
     rotationSteps: config.rotationSteps,
+    mutationRate: 0.3,
+    // Safety cap proportional to the user's nominal generation budget (convergence
+    // normally stops sooner). 3x headroom lets a still-improving run finish without
+    // ballooning the worst case to a flat 200; floor keeps small budgets workable.
+    maxGenerations: config.maxGenerations ?? Math.max(config.generations * 3, 120),
+    stallWindow: config.stallWindow ?? 15,
+    stallEpsilon: config.stallEpsilon ?? 0.005,
   };
 }
 
