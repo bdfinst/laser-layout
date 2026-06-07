@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-07
 **Branch**: `feat/density-aware-nesting` (integration base)
-**Status**: in-progress
+**Status**: implemented
 **Spec**: `docs/specs/density-aware-nesting.md`
 **Type**: coordinator — owns goal, all acceptance criteria, the shared behavior contract, and the
 merge gate. Each unit is its own plan file with its own Build Progress (see Slices index below).
@@ -249,11 +249,11 @@ measures the integrated system and can only run after all three merge.
 
 ## Pre-PR Quality Gate
 
-- [ ] All tests pass (`npm test`)
-- [ ] Type check passes (`npm run check`)
-- [ ] Linter passes (`npm run lint`)
-- [ ] `/code-review` passes
-- [ ] Documentation updated (CLAUDE.md nesting-pipeline notes if config fields/behavior changed)
+- [x] All tests pass (`npm test`)
+- [x] Type check passes (`npm run check`)
+- [x] Linter passes (`npm run lint`)
+- [x] `/code-review` passes
+- [x] Documentation updated (CLAUDE.md nesting-pipeline notes if config fields/behavior changed)
 
 ## Risks & Open Questions
 
@@ -343,7 +343,7 @@ acceptance flagged one blocker + warnings, all fixed directly in a final pass.
 - [x] Merge Slice B → base (resolve mechanical `optimizer.ts` overlap with A)
 - [x] Merge Slice C → base
 - [x] Join lands on base
-- [ ] `/code-review` + Pre-PR gate
+- [x] `/code-review` + Pre-PR gate
 
 ### Acceptance Criteria
 
