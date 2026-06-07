@@ -1,0 +1,14 @@
+# Build artifacts
+.svelte-kit
+build
+dist
+coverage
+test-results
+playwright-report
+
+# Dependencies and lockfiles
+node_modules
+package-lock.json
+
+# Test data (do not reformat fixtures)
+test-fixtures
