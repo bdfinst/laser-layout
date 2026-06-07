@@ -29,6 +29,7 @@ export interface PlacedPart {
   x: number;
   y: number;
   rotation: number; // radians
+  mirror?: boolean; // reflected across the vertical axis before rotation
 }
 
 /** Material sheet dimensions in mm */

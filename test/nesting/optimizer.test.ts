@@ -4,6 +4,7 @@ import {
   optimizeIterative,
   hasStalled,
   fitnessFromStats,
+  heuristicOrders,
   PENALTY_PER_UNPLACED,
   DEFAULT_OPTIMIZER_CONFIG,
 } from '$lib/nesting/optimizer';
@@ -263,5 +264,22 @@ describe('optimizeIterative convergence', () => {
       count++;
     }
     expect(count).toBe(config.maxGenerations);
+  });
+});
+
+describe('heuristicOrders (pure)', () => {
+  it('returns a biggest-area-first ordering and a tallest-first ordering (#13)', () => {
+    // areas: a=100, b=2000, c=1200 ; heights: a=10, b=40, c=60
+    const parts = [makePart('a', 10, 10), makePart('b', 50, 40), makePart('c', 20, 60)];
+    const [byArea, byHeight] = heuristicOrders(parts);
+    expect(byArea).toEqual([1, 2, 0]); // b, c, a by descending bbox area
+    expect(byHeight).toEqual([2, 1, 0]); // c, b, a by descending height
+  });
+
+  it('returns permutations of all part indices', () => {
+    const parts = [makePart('a', 5, 5), makePart('b', 6, 6), makePart('c', 7, 7)];
+    for (const order of heuristicOrders(parts)) {
+      expect([...order].sort((x, y) => x - y)).toEqual([0, 1, 2]);
+    }
   });
 });

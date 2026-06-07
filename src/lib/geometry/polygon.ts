@@ -93,24 +93,32 @@ export function rotatePolygon(polygon: Polygon, angle: number, center?: Point): 
  * their correct position relative to the outer boundary through rotation and
  * placement. `polygons[0]` is the outer boundary; the rest are cutouts.
  */
+/** Reflect a polygon across the vertical axis (negate x). Reverses winding. */
+export function reflectPolygon(polygon: Polygon): Polygon {
+  return polygon.map((p) => ({ x: 0 - p.x, y: p.y }));
+}
+
 export function transformPartPolygons(
   polygons: Polygon[],
   rotation: number,
   x: number,
   y: number,
+  mirror = false,
 ): Polygon[] {
   if (polygons.length === 0) return [];
-  const center = centroid(polygons[0]);
-  const rotated = polygons.map((poly) => rotatePolygon(poly, rotation, center));
+  // Mirror (reflect) before rotating so the flip composes correctly.
+  const base = mirror ? polygons.map(reflectPolygon) : polygons;
+  const center = centroid(base[0]);
+  const rotated = base.map((poly) => rotatePolygon(poly, rotation, center));
   const outerBB = boundingBox(rotated[0]);
   const dx = x - outerBB.minX;
   const dy = y - outerBB.minY;
   return rotated.map((poly) => translatePolygon(poly, dx, dy));
 }
 
-/** Get the transformed polygons for a placed part (rigid-body rotate + place) */
+/** Get the transformed polygons for a placed part (rigid-body mirror + rotate + place) */
 export function getPlacedPolygons(pp: PlacedPart): Polygon[] {
-  return transformPartPolygons(pp.part.polygons, pp.rotation, pp.x, pp.y);
+  return transformPartPolygons(pp.part.polygons, pp.rotation, pp.x, pp.y, pp.mirror ?? false);
 }
 
 /** Convert a polygon to an SVG path d attribute string */

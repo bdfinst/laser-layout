@@ -8,7 +8,7 @@ export default defineConfig({
   test: {
     include: ['bench/**/*.bench.ts'],
     environment: 'jsdom', // lightburn parser uses DOMParser
-    testTimeout: 120000,
+    testTimeout: 600000,
     // The benchmark prints a table to stdout; let console output through the default reporter.
     silent: false,
     disableConsoleIntercept: true,

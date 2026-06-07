@@ -232,3 +232,83 @@ function hasSeparatingAxis(a: Polygon, b: Polygon): boolean {
   }
   return false;
 }
+
+// --- Concavity anchors (NFP-flavored candidate generation, #12) ---
+
+/**
+ * Reflex (concave) vertices of a polygon — the inner corners of its notches. These are
+ * the positions where another part can tuck into a concavity. An NFP-flavored approximation
+ * of full non-convex no-fit-polygon placement: seed candidate anchors here, then validate
+ * with exact collision. Winding-independent. Returns [] for convex polygons / triangles.
+ */
+export function reflexVertices(poly: Polygon): Point[] {
+  const n = poly.length;
+  if (n < 4) return [];
+  const ccw = signedArea(poly) > 0;
+  const out: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = poly[(i - 1 + n) % n];
+    const curr = poly[i];
+    const next = poly[(i + 1) % n];
+    const cross = (curr.x - prev.x) * (next.y - curr.y) - (curr.y - prev.y) * (next.x - curr.x);
+    if (ccw ? cross < 0 : cross > 0) out.push(curr);
+  }
+  return out;
+}
+
+// --- Polygon proximity (true-shape spacing for kerf > 0, #11) ---
+
+function pointSegmentDistanceSq(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const ex = p.x - (a.x + t * dx);
+  const ey = p.y - (a.y + t * dy);
+  return ex * ex + ey * ey;
+}
+
+function orient(a: Point, b: Point, c: Point): number {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function segmentsIntersect(p1: Point, p2: Point, p3: Point, p4: Point): boolean {
+  const d1 = orient(p3, p4, p1);
+  const d2 = orient(p3, p4, p2);
+  const d3 = orient(p1, p2, p3);
+  const d4 = orient(p1, p2, p4);
+  return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0;
+}
+
+function segmentDistanceSq(a1: Point, a2: Point, b1: Point, b2: Point): number {
+  if (segmentsIntersect(a1, a2, b1, b2)) return 0;
+  return Math.min(
+    pointSegmentDistanceSq(a1, b1, b2),
+    pointSegmentDistanceSq(a2, b1, b2),
+    pointSegmentDistanceSq(b1, a1, a2),
+    pointSegmentDistanceSq(b2, a1, a2),
+  );
+}
+
+/**
+ * True-shape proximity test: are polygons `a` and `b` closer than `dist` (overlapping,
+ * one containing the other, or their outlines within `dist`)? Exact for concave polygons.
+ * Touching at exactly `dist` is NOT closer (strict less-than). Used to honor kerf spacing
+ * by true outline rather than bounding box. Compares squared distances to avoid sqrt.
+ */
+export function polygonsCloserThan(a: Polygon, b: Polygon, dist: number): boolean {
+  // Containment (no edge crossing): a vertex of one inside the other.
+  if (pointInPolygon(a[0], b) || pointInPolygon(b[0], a)) return true;
+  const distSq = dist * dist;
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      if (segmentDistanceSq(a1, a2, b1, b2) < distSq) return true;
+    }
+  }
+  return false;
+}

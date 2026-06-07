@@ -4,10 +4,13 @@ import {
   rotatePolygon,
   translatePolygon,
   transformPartPolygons,
+  reflectPolygon,
 } from '$lib/geometry/polygon';
 import type { BoundingBox } from '$lib/geometry/types';
 import {
   polygonsOverlap,
+  polygonsCloserThan,
+  reflexVertices,
   insetPolygon as computeInsetPolygon,
   polygonContainsPolygon,
 } from './nfp';
@@ -33,7 +36,7 @@ interface PlacementResult {
 }
 
 export function bottomLeftFill(
-  parts: { part: Part; rotation: number }[],
+  parts: { part: Part; rotation: number; mirror?: boolean }[],
   sheet: MaterialSheet,
   kerf: number = 0,
 ): PlacedPart[] {
@@ -41,8 +44,8 @@ export function bottomLeftFill(
   const cache: CachedPlacement[] = [];
   let holes: CachedHole[] = [];
 
-  for (const { part, rotation } of parts) {
-    const outerPoly = part.polygons[0];
+  for (const { part, rotation, mirror } of parts) {
+    const outerPoly = mirror ? reflectPolygon(part.polygons[0]) : part.polygons[0];
     const rotated = rotatePolygon(outerPoly, rotation);
     const bb = boundingBox(rotated);
     const normalized = translatePolygon(rotated, -bb.minX, -bb.minY);
@@ -62,7 +65,7 @@ export function bottomLeftFill(
       kerf,
     );
     if (result) {
-      const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation };
+      const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation, mirror };
       placed.push(pp);
       const finalPoly = translatePolygon(normalized, result.position.x, result.position.y);
       const finalBB: BoundingBox = {
@@ -80,7 +83,14 @@ export function bottomLeftFill(
         result.hole.innerPlacements.push(cp);
       } else {
         // Only extract holes from parts placed on the sheet (no recursive nesting)
-        const newHoles = extractHoles(part, rotation, result.position, cache.length - 1, kerf);
+        const newHoles = extractHoles(
+          part,
+          rotation,
+          result.position,
+          cache.length - 1,
+          kerf,
+          mirror,
+        );
         holes = [...holes, ...newHoles];
       }
     }
@@ -95,12 +105,19 @@ function extractHoles(
   position: Point,
   sourcePlacementIndex: number,
   kerf: number,
+  mirror?: boolean,
 ): CachedHole[] {
   if (part.polygons.length <= 1) return [];
 
   // Transform the whole part as a rigid body so holes keep their position
   // relative to the outer boundary (index 0 = outer boundary, 1.. = holes).
-  const placedPolys = transformPartPolygons(part.polygons, rotation, position.x, position.y);
+  const placedPolys = transformPartPolygons(
+    part.polygons,
+    rotation,
+    position.x,
+    position.y,
+    mirror,
+  );
   const result: CachedHole[] = [];
 
   for (let i = 1; i < placedPolys.length; i++) {
@@ -203,6 +220,24 @@ function candidateAnchors(
 }
 
 /**
+ * Concavity anchors (#12): seat each of the part's four corners at every reflex (notch)
+ * vertex of a placed part, so the part can tuck into a concavity. Invalid seatings are
+ * rejected by the exact collision check; valid ones are settled by the slide.
+ */
+function concavityAnchors(cp: CachedPlacement, partBB: { width: number; height: number }): Point[] {
+  const out: Point[] = [];
+  for (const r of reflexVertices(cp.polygon)) {
+    out.push(
+      { x: r.x, y: r.y },
+      { x: r.x - partBB.width, y: r.y },
+      { x: r.x, y: r.y - partBB.height },
+      { x: r.x - partBB.width, y: r.y - partBB.height },
+    );
+  }
+  return out;
+}
+
+/**
  * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
  * step down while still collision-free, then step left while still collision-free.
  * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
@@ -226,13 +261,22 @@ function slideBottomLeft(
   let cx = x;
   let cy = y;
 
-  let i = 0;
-  while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
-    cy -= step;
-  }
-  i = 0;
-  while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
-    cx -= step;
+  // Alternate down/left until neither frees further movement (fixed point). A left move
+  // can open vertical room and vice-versa, so one pass misses L-shaped pockets (#14).
+  // Most settling happens in the first round or two; cap to bound cost.
+  const MAX_ROUNDS = 3;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const prevX = cx;
+    const prevY = cy;
+    let i = 0;
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
+      cy -= step;
+    }
+    i = 0;
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
+      cx -= step;
+    }
+    if (cx === prevX && cy === prevY) break; // converged
   }
 
   return { x: cx, y: cy };
@@ -245,29 +289,54 @@ function tryAdjacentPositions(
   sheet: MaterialSheet,
   kerf: number,
 ): PlacementResult | null {
-  const candidates: { x: number; y: number; score: number }[] = [];
-
+  // Generate candidate positions (cheap): bbox corners + interior-gap anchors (gap-fill)
+  // + concavity anchors (#12 — seat the part's corners at placed parts' reflex/notch
+  // vertices so it can tuck into concavities). Validation is expensive (true-shape kerf
+  // collision), so we cap how many positions we validate and slide rather than checking
+  // every one. Concavity generation is an NFP-flavored candidate set; exact collision
+  // and the slide reject/settle them.
+  const score = (x: number, y: number) => y * sheet.width + x;
+  const positions: { x: number; y: number; score: number }[] = [];
   for (const cp of cache) {
-    for (const pos of candidateAnchors(cp, partBB, kerf)) {
-      if (
-        pos.x >= 0 &&
-        pos.y >= 0 &&
-        pos.x + partBB.width <= sheet.width &&
-        pos.y + partBB.height <= sheet.height &&
-        !hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)
-      ) {
-        // Pull the candidate toward the origin so it settles into any open gap
-        // beneath/left of it that does not raise the strip height.
-        const slid = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
-        candidates.push({ ...slid, score: slid.y * sheet.width + slid.x });
-      }
+    for (const pos of candidateAnchors(cp, partBB, kerf))
+      positions.push({ ...pos, score: score(pos.x, pos.y) });
+    for (const pos of concavityAnchors(cp, partBB))
+      positions.push({ ...pos, score: score(pos.x, pos.y) });
+  }
+
+  // Keep only in-sheet positions, prefer the lowest (bottom-left), and validate at most
+  // VALIDATE_BUDGET of them with the expensive collision check — bounds cost regardless
+  // of how many notches the placed parts have.
+  const VALIDATE_BUDGET = 40;
+  const SLIDE_BUDGET = 6;
+  const inSheet = positions.filter(
+    (p) =>
+      p.x >= 0 &&
+      p.y >= 0 &&
+      p.x + partBB.width <= sheet.width &&
+      p.y + partBB.height <= sheet.height,
+  );
+  inSheet.sort((a, b) => a.score - b.score);
+
+  let best: { x: number; y: number; score: number } | null = null;
+  let validated = 0;
+  let slid = 0;
+  for (const pos of inSheet) {
+    if (validated >= VALIDATE_BUDGET) break;
+    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)) continue;
+    validated++;
+    // Slide only the first few collision-free candidates toward the origin.
+    if (slid < SLIDE_BUDGET) {
+      slid++;
+      const s = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
+      const sc = score(s.x, s.y);
+      if (!best || sc < best.score) best = { x: s.x, y: s.y, score: sc };
+    } else if (!best || pos.score < best.score) {
+      best = pos;
     }
   }
 
-  if (candidates.length === 0) return null;
-
-  candidates.sort((a, b) => a.score - b.score);
-  return { position: { x: candidates[0].x, y: candidates[0].y }, hole: null };
+  return best ? { position: { x: best.x, y: best.y }, hole: null } : null;
 }
 
 function tryGridFallback(
@@ -336,11 +405,13 @@ function checkOverlap(
       continue;
     }
 
-    // When kerf > 0, bounding-box overlap (with kerf margin) is treated as collision.
-    // This is an intentional approximation: exact polygon overlap checking with kerf
-    // would require offsetting polygons, which is expensive. The tradeoff is slightly
-    // less dense packing when kerf is non-zero, but much faster placement.
-    if (kerf > 0) return true;
+    // kerf > 0: true-shape spacing — parts may approach until their actual outlines are
+    // `kerf` apart (the bbox test above is only a cheap pre-filter). kerf == 0: exact
+    // overlap. (#11 — replaces the old bbox-overlap approximation for kerf > 0.)
+    if (kerf > 0) {
+      if (polygonsCloserThan(translatedPoly, cp.polygon, kerf)) return true;
+      continue;
+    }
 
     if (polygonsOverlap(translatedPoly, cp.polygon)) {
       return true;

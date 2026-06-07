@@ -1,6 +1,23 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
+import { boundingBox } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
 import { openAreaStats } from './stats';
+
+/**
+ * Deterministic "biggest-first" seed orderings for the initial GA population.
+ * Classic bottom-left-fill packs best when large parts are placed first, so seeding
+ * the population with parts sorted by descending bounding-box area and by descending
+ * height gives the GA strong starting points. Returns index permutations (rotation 0).
+ */
+export function heuristicOrders(parts: Part[]): number[][] {
+  const dims = parts.map((p) => boundingBox(p.polygons[0]));
+  const idx = Array.from({ length: parts.length }, (_, i) => i);
+  const byArea = [...idx].sort(
+    (a, b) => dims[b].width * dims[b].height - dims[a].width * dims[a].height,
+  );
+  const byHeight = [...idx].sort((a, b) => dims[b].height - dims[a].height);
+  return [byArea, byHeight];
+}
 
 // Density-aware fitness (lower is better). Feasibility dominates: each unplaced part
 // adds a heavy penalty that always outranks any open-area/strip difference. Open-area
@@ -54,14 +71,19 @@ export function hasStalled(history: number[], window: number, epsilon: number): 
 interface Individual {
   rotations: number[]; // rotation angle in radians for each part
   order: number[]; // placement order (indices into parts array)
+  mirrors: boolean[]; // reflection flag for each part (#15)
   fitness: number; // lower is better (open-area ratio + unplaced penalty)
   placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
 }
 
-function toOrderedParts(individual: Individual, parts: Part[]): { part: Part; rotation: number }[] {
+function toOrderedParts(
+  individual: Individual,
+  parts: Part[],
+): { part: Part; rotation: number; mirror: boolean }[] {
   return individual.order.map((idx, i) => ({
     part: parts[idx],
     rotation: individual.rotations[i],
+    mirror: individual.mirrors[i],
   }));
 }
 
@@ -101,11 +123,26 @@ export function* optimizeIterative(
   const noRotation: Individual = {
     rotations: new Array(n).fill(0),
     order: Array.from({ length: n }, (_, i) => i),
+    mirrors: new Array(n).fill(false),
     fitness: 0,
     placement: [],
   };
   noRotation.fitness = evaluate(noRotation, parts, sheet, kerf);
   population[0] = noRotation;
+
+  // Seed a few individuals with biggest-first heuristic orderings (#13).
+  const seeds = heuristicOrders(parts);
+  for (let s = 0; s < seeds.length && s + 1 < config.populationSize; s++) {
+    const seeded: Individual = {
+      rotations: new Array(n).fill(0),
+      order: seeds[s],
+      mirrors: new Array(n).fill(false),
+      fitness: 0,
+      placement: [],
+    };
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf);
+    population[s + 1] = seeded;
+  }
 
   // Sort initial population
   population.sort((a, b) => a.fitness - b.fitness);
@@ -185,7 +222,9 @@ function createRandomIndividual(n: number, angleStep: number, rotationSteps: num
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  const mirrors = Array.from({ length: n }, () => Math.random() < 0.5);
+
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }
 
 function evaluate(
@@ -219,10 +258,13 @@ function crossover(parent1: Individual, parent2: Individual, n: number): Individ
     Math.random() < 0.5 ? r : parent2.rotations[i],
   );
 
+  // Uniform crossover for mirror flags (by position, like rotations)
+  const mirrors = parent1.mirrors.map((m, i) => (Math.random() < 0.5 ? m : parent2.mirrors[i]));
+
   // Order crossover (OX) for placement order
   const order = orderCrossover(parent1.order, parent2.order, n);
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }
 
 function orderCrossover(p1: number[], p2: number[], n: number): number[] {
@@ -254,12 +296,17 @@ function orderCrossover(p1: number[], p2: number[], n: number): number[] {
 function mutate(individual: Individual, angleStep: number, rotationSteps: number): Individual {
   const rotations = [...individual.rotations];
   const order = [...individual.order];
+  const mirrors = [...individual.mirrors];
   const n = rotations.length;
 
   // Mutate rotation of a random part
   const rotIdx = Math.floor(Math.random() * n);
   const step = Math.floor(Math.random() * rotationSteps);
   rotations[rotIdx] = step * angleStep;
+
+  // Flip the mirror flag of a random part (#15)
+  const mirIdx = Math.floor(Math.random() * n);
+  mirrors[mirIdx] = !mirrors[mirIdx];
 
   // Swap two random positions in order
   if (n > 1) {
@@ -269,5 +316,5 @@ function mutate(individual: Individual, angleStep: number, rotationSteps: number
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }

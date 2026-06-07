@@ -6,5 +6,8 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'jsdom',
+    // Shape-aware nesting (true-shape kerf collision + concavity anchors) makes the
+    // integration nests run for several seconds; the default 5s is too tight.
+    testTimeout: 20000,
   },
 });

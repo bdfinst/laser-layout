@@ -56,6 +56,20 @@ function simplifyPartsForNesting(parts: Part[]): Part[] {
   }));
 }
 
+/**
+ * Global First-Fit-Decreasing ordering (#16): place the largest parts first across the
+ * whole job, not just within a sheet. Big parts seed early sheets and small parts fill the
+ * gaps they leave, which tends to reduce the total sheet count. Preserves the per-sheet GA
+ * and the overflow/generator contract — it only changes the order parts are considered in.
+ */
+function sortByDescendingArea(parts: Part[]): Part[] {
+  return [...parts].sort((a, b) => {
+    const ba = boundingBox(a.polygons[0]);
+    const bb = boundingBox(b.polygons[0]);
+    return bb.width * bb.height - ba.width * ba.height;
+  });
+}
+
 export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
   return {
     populationSize: config.populationSize,
@@ -115,7 +129,7 @@ export function* nestPartsIterative(
   input: NestingInput,
 ): Generator<NestingProgress, NestingResult, void> {
   const { parts, quantities, config } = input;
-  let remaining = simplifyPartsForNesting(expandParts(parts, quantities));
+  let remaining = sortByDescendingArea(simplifyPartsForNesting(expandParts(parts, quantities)));
 
   if (remaining.length === 0) {
     return EMPTY_RESULT(config);
@@ -174,7 +188,7 @@ export function nestParts(
   onProgress?: (generation: number, bestFitness: number) => void,
 ): NestingResult {
   const { parts, quantities, config } = input;
-  let remaining = simplifyPartsForNesting(expandParts(parts, quantities));
+  let remaining = sortByDescendingArea(simplifyPartsForNesting(expandParts(parts, quantities)));
 
   if (remaining.length === 0) {
     return EMPTY_RESULT(config);
