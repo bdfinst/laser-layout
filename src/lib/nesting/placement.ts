@@ -9,6 +9,7 @@ import type { BoundingBox } from '$lib/geometry/types';
 import {
   polygonsOverlap,
   polygonsCloserThan,
+  reflexVertices,
   insetPolygon as computeInsetPolygon,
   polygonContainsPolygon,
 } from './nfp';
@@ -204,6 +205,24 @@ function candidateAnchors(
 }
 
 /**
+ * Concavity anchors (#12): seat each of the part's four corners at every reflex (notch)
+ * vertex of a placed part, so the part can tuck into a concavity. Invalid seatings are
+ * rejected by the exact collision check; valid ones are settled by the slide.
+ */
+function concavityAnchors(cp: CachedPlacement, partBB: { width: number; height: number }): Point[] {
+  const out: Point[] = [];
+  for (const r of reflexVertices(cp.polygon)) {
+    out.push(
+      { x: r.x, y: r.y },
+      { x: r.x - partBB.width, y: r.y },
+      { x: r.x, y: r.y - partBB.height },
+      { x: r.x - partBB.width, y: r.y - partBB.height },
+    );
+  }
+  return out;
+}
+
+/**
  * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
  * step down while still collision-free, then step left while still collision-free.
  * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
@@ -255,37 +274,54 @@ function tryAdjacentPositions(
   sheet: MaterialSheet,
   kerf: number,
 ): PlacementResult | null {
-  // Collect collision-free anchors scored by their pre-slide bottom-left position.
-  const anchors: { x: number; y: number; score: number }[] = [];
+  // Generate candidate positions (cheap): bbox corners + interior-gap anchors (gap-fill)
+  // + concavity anchors (#12 — seat the part's corners at placed parts' reflex/notch
+  // vertices so it can tuck into concavities). Validation is expensive (true-shape kerf
+  // collision), so we cap how many positions we validate and slide rather than checking
+  // every one. Concavity generation is an NFP-flavored candidate set; exact collision
+  // and the slide reject/settle them.
+  const score = (x: number, y: number) => y * sheet.width + x;
+  const positions: { x: number; y: number; score: number }[] = [];
   for (const cp of cache) {
-    for (const pos of candidateAnchors(cp, partBB, kerf)) {
-      if (
-        pos.x >= 0 &&
-        pos.y >= 0 &&
-        pos.x + partBB.width <= sheet.width &&
-        pos.y + partBB.height <= sheet.height &&
-        !hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)
-      ) {
-        anchors.push({ ...pos, score: pos.y * sheet.width + pos.x });
-      }
+    for (const pos of candidateAnchors(cp, partBB, kerf))
+      positions.push({ ...pos, score: score(pos.x, pos.y) });
+    for (const pos of concavityAnchors(cp, partBB))
+      positions.push({ ...pos, score: score(pos.x, pos.y) });
+  }
+
+  // Keep only in-sheet positions, prefer the lowest (bottom-left), and validate at most
+  // VALIDATE_BUDGET of them with the expensive collision check — bounds cost regardless
+  // of how many notches the placed parts have.
+  const VALIDATE_BUDGET = 40;
+  const SLIDE_BUDGET = 6;
+  const inSheet = positions.filter(
+    (p) =>
+      p.x >= 0 &&
+      p.y >= 0 &&
+      p.x + partBB.width <= sheet.width &&
+      p.y + partBB.height <= sheet.height,
+  );
+  inSheet.sort((a, b) => a.score - b.score);
+
+  let best: { x: number; y: number; score: number } | null = null;
+  let validated = 0;
+  let slid = 0;
+  for (const pos of inSheet) {
+    if (validated >= VALIDATE_BUDGET) break;
+    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)) continue;
+    validated++;
+    // Slide only the first few collision-free candidates toward the origin.
+    if (slid < SLIDE_BUDGET) {
+      slid++;
+      const s = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
+      const sc = score(s.x, s.y);
+      if (!best || sc < best.score) best = { x: s.x, y: s.y, score: sc };
+    } else if (!best || pos.score < best.score) {
+      best = pos;
     }
   }
 
-  if (anchors.length === 0) return null;
-
-  // Slide only the most promising anchors toward the origin (gap-filling). Sliding is
-  // the expensive step (especially with true-shape kerf collision), so cap how many we
-  // slide rather than sliding every anchor.
-  const SLIDE_BUDGET = 6;
-  anchors.sort((a, b) => a.score - b.score);
-  let best: { x: number; y: number; score: number } | null = null;
-  for (const anchor of anchors.slice(0, SLIDE_BUDGET)) {
-    const slid = slideBottomLeft(normalizedPoly, anchor.x, anchor.y, partBB, cache, sheet, kerf);
-    const score = slid.y * sheet.width + slid.x;
-    if (!best || score < best.score) best = { ...slid, score };
-  }
-
-  return { position: { x: best!.x, y: best!.y }, hole: null };
+  return best ? { position: { x: best.x, y: best.y }, hole: null } : null;
 }
 
 function tryGridFallback(

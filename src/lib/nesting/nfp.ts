@@ -233,6 +233,29 @@ function hasSeparatingAxis(a: Polygon, b: Polygon): boolean {
   return false;
 }
 
+// --- Concavity anchors (NFP-flavored candidate generation, #12) ---
+
+/**
+ * Reflex (concave) vertices of a polygon — the inner corners of its notches. These are
+ * the positions where another part can tuck into a concavity. An NFP-flavored approximation
+ * of full non-convex no-fit-polygon placement: seed candidate anchors here, then validate
+ * with exact collision. Winding-independent. Returns [] for convex polygons / triangles.
+ */
+export function reflexVertices(poly: Polygon): Point[] {
+  const n = poly.length;
+  if (n < 4) return [];
+  const ccw = signedArea(poly) > 0;
+  const out: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = poly[(i - 1 + n) % n];
+    const curr = poly[i];
+    const next = poly[(i + 1) % n];
+    const cross = (curr.x - prev.x) * (next.y - curr.y) - (curr.y - prev.y) * (next.x - curr.x);
+    if (ccw ? cross < 0 : cross > 0) out.push(curr);
+  }
+  return out;
+}
+
 // --- Polygon proximity (true-shape spacing for kerf > 0, #11) ---
 
 function pointSegmentDistanceSq(p: Point, a: Point, b: Point): number {
