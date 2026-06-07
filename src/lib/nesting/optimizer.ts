@@ -1,6 +1,24 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 import { bottomLeftFill } from './placement';
-import { getStripHeight } from './stats';
+import { openAreaStats } from './stats';
+
+// Density-aware fitness (lower is better). Feasibility dominates: each unplaced part
+// adds a heavy penalty that always outranks any open-area/strip difference. Open-area
+// ratio (in [0,1]) is the primary in-region objective; strip height is a tiny tiebreaker.
+export const PENALTY_PER_UNPLACED = 1000;
+export const STRIP_TIEBREAK = 1e-3;
+
+export function fitnessFromStats(
+  stats: { openAreaRatio: number; stripHeight: number },
+  unplacedCount: number,
+  sheetHeight: number,
+): number {
+  return (
+    unplacedCount * PENALTY_PER_UNPLACED +
+    stats.openAreaRatio +
+    STRIP_TIEBREAK * (sheetHeight > 0 ? stats.stripHeight / sheetHeight : 0)
+  );
+}
 
 export interface OptimizerConfig {
   populationSize: number;
@@ -165,11 +183,10 @@ function evaluate(
   }));
 
   const placed = bottomLeftFill(orderedParts, sheet, kerf);
+  const stats = openAreaStats(placed, sheet);
+  const unplacedCount = parts.length - placed.length;
 
-  // Penalize unplaced parts heavily
-  const unplacedPenalty = (parts.length - placed.length) * sheet.height;
-
-  return getStripHeight(placed) + unplacedPenalty;
+  return fitnessFromStats(stats, unplacedCount, sheet.height);
 }
 
 function tournamentSelect(population: Individual[], size: number = 3): Individual {

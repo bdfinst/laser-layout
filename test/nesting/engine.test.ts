@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { nestParts, nestPartsIterative, computeMinimumSheet } from '$lib/nesting/engine';
+import { computeSheetStats, openAreaStats } from '$lib/nesting/stats';
+import { bottomLeftFill } from '$lib/nesting/placement';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -131,6 +133,22 @@ describe('nestPartsIterative', () => {
     } while (!iter.done);
     expect(iter.value.sheets).toHaveLength(1);
     expect(iter.value.totalPlaced).toBe(1);
+  });
+});
+
+describe('single source of truth (A12)', () => {
+  it('computeSheetStats utilization equals 1 - openAreaStats openAreaRatio', () => {
+    const sheet = fastConfig.sheet;
+    const placed = bottomLeftFill(
+      [
+        { part: makePart('a', 50, 50), rotation: 0 },
+        { part: makePart('b', 20, 20), rotation: 0 },
+      ],
+      sheet,
+    );
+    const computed = computeSheetStats(placed, sheet);
+    const area = openAreaStats(placed, sheet);
+    expect(computed.utilization).toBeCloseTo(1 - area.openAreaRatio);
   });
 });
 

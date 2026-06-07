@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { optimize, optimizeIterative, DEFAULT_OPTIMIZER_CONFIG } from '$lib/nesting/optimizer';
+import {
+  optimize,
+  optimizeIterative,
+  fitnessFromStats,
+  DEFAULT_OPTIMIZER_CONFIG,
+} from '$lib/nesting/optimizer';
 import type { Part } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -32,6 +37,37 @@ beforeEach(() => {
 });
 afterEach(() => {
   Math.random = origRandom;
+});
+
+describe('fitnessFromStats (pure)', () => {
+  const sheetHeight = 100;
+
+  it('ranks the denser layout (lower openAreaRatio) better for equal unplaced/strip', () => {
+    const dense = fitnessFromStats({ openAreaRatio: 0.2, stripHeight: 50 }, 0, sheetHeight);
+    const gappy = fitnessFromStats({ openAreaRatio: 0.6, stripHeight: 50 }, 0, sheetHeight);
+    expect(dense).toBeLessThan(gappy);
+  });
+
+  it('makes any unplaced layout worse than an all-placed one regardless of density (A2)', () => {
+    // all placed but very gappy
+    const allPlaced = fitnessFromStats({ openAreaRatio: 1, stripHeight: 100 }, 0, sheetHeight);
+    // one unplaced but perfectly dense
+    const oneUnplaced = fitnessFromStats({ openAreaRatio: 0, stripHeight: 0 }, 1, sheetHeight);
+    expect(oneUnplaced).toBeGreaterThan(allPlaced);
+  });
+
+  it('breaks ties by strip height when density and unplaced are equal (tiebreak)', () => {
+    const shorter = fitnessFromStats({ openAreaRatio: 0.4, stripHeight: 30 }, 0, sheetHeight);
+    const taller = fitnessFromStats({ openAreaRatio: 0.4, stripHeight: 80 }, 0, sheetHeight);
+    expect(shorter).toBeLessThan(taller);
+  });
+
+  it('gives empty placement fitness == totalParts*1000 + 1 and finite (A1)', () => {
+    const totalParts = 3;
+    const f = fitnessFromStats({ openAreaRatio: 1, stripHeight: 0 }, totalParts, sheetHeight);
+    expect(f).toBe(totalParts * 1000 + 1);
+    expect(Number.isFinite(f)).toBe(true);
+  });
 });
 
 describe('optimize', () => {
