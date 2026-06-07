@@ -43,3 +43,7 @@ npx playwright test  # e2e tests
 - Vitest + Playwright
 - ESLint with TypeScript and Svelte plugins
 - Husky pre-commit hooks (lint + type-check + tests)
+
+## CodeGraph
+
+This repository uses [CodeGraph](https://github.com/colbymchenry/codegraph) for semantic code intelligence.
