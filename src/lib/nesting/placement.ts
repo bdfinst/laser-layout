@@ -219,7 +219,9 @@ function slideBottomLeft(
   kerf: number,
 ): Point {
   const step = Math.max(1, Math.min(partBB.width, partBB.height) / 4);
-  const MAX_STEPS = 1000;
+  // Bound iterations to what the sheet can physically accommodate (never more than the
+  // sheet's longest side / step), so the cap stays tight regardless of sheet size.
+  const MAX_STEPS = Math.ceil(Math.max(sheet.width, sheet.height) / step) + 1;
 
   let cx = x;
   let cy = y;

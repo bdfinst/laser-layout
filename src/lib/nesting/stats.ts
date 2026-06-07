@@ -25,14 +25,24 @@ function clamp(value: number, lo: number, hi: number): number {
  * Density metric for a placement. The number the GA minimizes (via openAreaRatio)
  * and the reported utilization (1 - openAreaRatio) both come from here.
  */
+/** Max-Y extent of all placed parts — the single strip-height implementation. */
+function stripHeightOf(placed: PlacedPart[]): number {
+  let maxY = 0;
+  for (const pp of placed) {
+    for (const poly of getPlacedPolygons(pp)) {
+      const bb = boundingBox(poly);
+      if (bb.maxY > maxY) maxY = bb.maxY;
+    }
+  }
+  return maxY;
+}
+
 export function openAreaStats(placed: PlacedPart[], sheet: MaterialSheet): OpenAreaStats {
   if (placed.length === 0) {
     return { stripHeight: 0, partsArea: 0, usedArea: 0, openAreaRatio: 1, utilization: 0 };
   }
 
-  let stripHeight = 0;
   let partsArea = 0;
-
   for (const pp of placed) {
     const polys = getPlacedPolygons(pp);
     if (polys.length === 0) continue;
@@ -43,13 +53,9 @@ export function openAreaStats(placed: PlacedPart[], sheet: MaterialSheet): OpenA
       area -= polygonArea(polys[i]);
     }
     partsArea += area;
-
-    for (const poly of polys) {
-      const bb = boundingBox(poly);
-      if (bb.maxY > stripHeight) stripHeight = bb.maxY;
-    }
   }
 
+  const stripHeight = stripHeightOf(placed);
   const usedArea = stripHeight * sheet.width;
   const openAreaRatio = usedArea > 0 ? clamp((usedArea - partsArea) / usedArea, 0, 1) : 1;
   const utilization = 1 - openAreaRatio;
@@ -71,14 +77,5 @@ export function calculateUtilization(placed: PlacedPart[], sheet: MaterialSheet)
 }
 
 export function getStripHeight(placed: PlacedPart[]): number {
-  if (placed.length === 0) return 0;
-  let maxY = 0;
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
-    for (const poly of polys) {
-      const bb = boundingBox(poly);
-      if (bb.maxY > maxY) maxY = bb.maxY;
-    }
-  }
-  return maxY;
+  return stripHeightOf(placed);
 }

@@ -54,7 +54,15 @@ export function hasStalled(history: number[], window: number, epsilon: number): 
 interface Individual {
   rotations: number[]; // rotation angle in radians for each part
   order: number[]; // placement order (indices into parts array)
-  fitness: number; // lower is better (strip height)
+  fitness: number; // lower is better (open-area ratio + unplaced penalty)
+  placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
+}
+
+function toOrderedParts(individual: Individual, parts: Part[]): { part: Part; rotation: number }[] {
+  return individual.order.map((idx, i) => ({
+    part: parts[idx],
+    rotation: individual.rotations[i],
+  }));
 }
 
 export interface OptimizeProgress {
@@ -94,6 +102,7 @@ export function* optimizeIterative(
     rotations: new Array(n).fill(0),
     order: Array.from({ length: n }, (_, i) => i),
     fitness: 0,
+    placement: [],
   };
   noRotation.fitness = evaluate(noRotation, parts, sheet, kerf);
   population[0] = noRotation;
@@ -130,15 +139,15 @@ export function* optimizeIterative(
     population.sort((a, b) => a.fitness - b.fitness);
 
     const best = population[0];
-    const bestPlacement = placementFromIndividual(best, parts, sheet, kerf);
-    yield { generation: gen, bestFitness: best.fitness, bestPlacement };
+    // best.placement was cached by evaluate() — no need to re-run bottomLeftFill here.
+    yield { generation: gen, bestFitness: best.fitness, bestPlacement: best.placement };
 
     history.push(best.fitness);
     if (hasStalled(history, config.stallWindow, config.stallEpsilon)) break;
   }
 
   // Population is already sorted from the last iteration
-  return placementFromIndividual(population[0], parts, sheet, kerf);
+  return population[0].placement;
 }
 
 /**
@@ -162,19 +171,6 @@ export function optimize(
   return last.value;
 }
 
-function placementFromIndividual(
-  individual: Individual,
-  parts: Part[],
-  sheet: MaterialSheet,
-  kerf: number,
-): PlacedPart[] {
-  const orderedParts = individual.order.map((idx, i) => ({
-    part: parts[idx],
-    rotation: individual.rotations[i],
-  }));
-  return bottomLeftFill(orderedParts, sheet, kerf);
-}
-
 function createRandomIndividual(n: number, angleStep: number, rotationSteps: number): Individual {
   const rotations: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -189,7 +185,7 @@ function createRandomIndividual(n: number, angleStep: number, rotationSteps: num
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }
 
 function evaluate(
@@ -198,12 +194,8 @@ function evaluate(
   sheet: MaterialSheet,
   kerf: number,
 ): number {
-  const orderedParts = individual.order.map((idx, i) => ({
-    part: parts[idx],
-    rotation: individual.rotations[i],
-  }));
-
-  const placed = bottomLeftFill(orderedParts, sheet, kerf);
+  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf);
+  individual.placement = placed; // cache for progress reporting / final return
   const stats = openAreaStats(placed, sheet);
   const unplacedCount = parts.length - placed.length;
 
@@ -230,7 +222,7 @@ function crossover(parent1: Individual, parent2: Individual, n: number): Individ
   // Order crossover (OX) for placement order
   const order = orderCrossover(parent1.order, parent2.order, n);
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }
 
 function orderCrossover(p1: number[], p2: number[], n: number): number[] {
@@ -277,5 +269,5 @@ function mutate(individual: Individual, angleStep: number, rotationSteps: number
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity };
+  return { rotations, order, fitness: Infinity, placement: [] };
 }

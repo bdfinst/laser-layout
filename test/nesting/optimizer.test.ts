@@ -4,6 +4,7 @@ import {
   optimizeIterative,
   hasStalled,
   fitnessFromStats,
+  PENALTY_PER_UNPLACED,
   DEFAULT_OPTIMIZER_CONFIG,
 } from '$lib/nesting/optimizer';
 import type { Part } from '$lib/geometry/types';
@@ -70,10 +71,17 @@ describe('fitnessFromStats (pure)', () => {
     expect(shorter).toBeLessThan(taller);
   });
 
-  it('gives empty placement fitness == totalParts*1000 + 1 and finite (A1)', () => {
+  it('gives empty placement fitness == totalParts*PENALTY + 1 and finite (A1)', () => {
     const totalParts = 3;
     const f = fitnessFromStats({ openAreaRatio: 1, stripHeight: 0 }, totalParts, sheetHeight);
-    expect(f).toBe(totalParts * 1000 + 1);
+    // openAreaRatio default 1, stripHeight 0 ⇒ no tiebreak term.
+    expect(f).toBe(totalParts * PENALTY_PER_UNPLACED + 1);
+    expect(Number.isFinite(f)).toBe(true);
+  });
+
+  it('is finite when sheetHeight is 0 (divide-by-zero guard)', () => {
+    const f = fitnessFromStats({ openAreaRatio: 0.5, stripHeight: 10 }, 0, 0);
+    expect(f).toBe(0.5); // tiebreak term is 0 when sheetHeight is 0
     expect(Number.isFinite(f)).toBe(true);
   });
 });

@@ -364,8 +364,14 @@ describe('gap-filling placement', () => {
             const a = result[i] as PlacedPart;
             const b = result[j] as PlacedPart;
             if (kerf === 0) {
-              // No two placed polygons overlap (bbox overlap is permitted).
-              expect(polygonsOverlap(getPlacedPolygons(a)[0], getPlacedPolygons(b)[0])).toBe(false);
+              // No two placed polygons overlap (bbox overlap is permitted). Check ALL
+              // polygon pairs across both parts, not just the outer boundaries, so an
+              // inner-ring-vs-outer overlap on holed parts can't slip through.
+              for (const pa of getPlacedPolygons(a)) {
+                for (const pb of getPlacedPolygons(b)) {
+                  expect(polygonsOverlap(pa, pb)).toBe(false);
+                }
+              }
             } else {
               // Every pair of bounding boxes is separated by >= kerf.
               const ba = boundingBox(getPlacedPolygons(a)[0]);

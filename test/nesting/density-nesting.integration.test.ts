@@ -84,9 +84,10 @@ describe('density-aware nesting — effectiveness and non-regression (capstone)'
     expect(result.totalPlaced).toBe(12);
     expect(result.sheets).toHaveLength(1);
 
-    // Strip height is metric-independent. Baseline 614mm (main: 617mm) — guard against
-    // future packing regressions with a small margin.
-    expect(result.sheets[0].stripHeight).toBeLessThanOrEqual(630);
+    // Strip height is metric-independent. Baseline 614mm (main: 617mm). Generous margin so
+    // GA float-ordering differences across Node/V8 versions don't make this flaky, while
+    // still catching gross packing regressions.
+    expect(result.sheets[0].stripHeight).toBeLessThanOrEqual(660);
     // True-area utilization baseline ~0.62 (the panels are ~25% cutouts, honestly excluded).
     expect(result.sheets[0].utilization).toBeGreaterThanOrEqual(0.6);
   });

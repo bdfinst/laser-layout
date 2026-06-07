@@ -58,6 +58,18 @@ describe('nestParts', () => {
     expect(result.totalPlaced).toBe(0);
   });
 
+  it('returns parts as unplaced when nothing fits on the sheet', () => {
+    // 200x200 part on the 100x100 fastConfig sheet — cannot be placed.
+    const result = nestParts({
+      parts: [makePart('huge', 200, 200)],
+      quantities: new Map([['huge', 1]]),
+      config: fastConfig,
+    });
+    expect(result.sheets).toHaveLength(0);
+    expect(result.totalPlaced).toBe(0);
+    expect(result.unplaced).toHaveLength(1);
+  });
+
   it('nests a single part on one sheet', () => {
     const result = nestParts({
       parts: [makePart('a', 20, 10)],
