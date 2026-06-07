@@ -6,6 +6,8 @@ import {
   makeOptimizerConfig,
 } from '$lib/nesting/engine';
 import { optimizeIterative } from '$lib/nesting/optimizer';
+import { computeSheetStats, openAreaStats } from '$lib/nesting/stats';
+import { bottomLeftFill } from '$lib/nesting/placement';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -212,6 +214,22 @@ describe('makeOptimizerConfig', () => {
       expect(count).toBeGreaterThanOrEqual(1);
       expect(count).toBeLessThanOrEqual(opt.maxGenerations);
     }
+  });
+});
+
+describe('single source of truth (A12)', () => {
+  it('computeSheetStats utilization equals 1 - openAreaStats openAreaRatio', () => {
+    const sheet = fastConfig.sheet;
+    const placed = bottomLeftFill(
+      [
+        { part: makePart('a', 50, 50), rotation: 0 },
+        { part: makePart('b', 20, 20), rotation: 0 },
+      ],
+      sheet,
+    );
+    const computed = computeSheetStats(placed, sheet);
+    const area = openAreaStats(placed, sheet);
+    expect(computed.utilization).toBeCloseTo(1 - area.openAreaRatio);
   });
 });
 
