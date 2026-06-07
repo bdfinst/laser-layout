@@ -114,7 +114,7 @@
     <button class="nest-btn" onclick={doNest} disabled={!canNest()}>
       {#if projectStore.state.isNesting}
         Nesting... Sheet {projectStore.state.currentSheet + 1}, Gen {projectStore.state.generation +
-          1}/{projectStore.state.config.generations}
+          1}
       {:else}
         Nest Parts
       {/if}

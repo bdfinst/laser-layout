@@ -32,8 +32,7 @@
     <div class="overall-stats" class:running={isRunning}>
       {#if isRunning}
         <span class="gen-badge">
-          Sheet {projectStore.state.currentSheet + 1}, Gen {projectStore.state.generation +
-            1}/{projectStore.state.config.generations}
+          Sheet {projectStore.state.currentSheet + 1}, Gen {projectStore.state.generation + 1}
         </span>
       {/if}
       <span>Sheets: {result.sheets.length}</span>
