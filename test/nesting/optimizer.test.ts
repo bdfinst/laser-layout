@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { optimize, optimizeIterative, DEFAULT_OPTIMIZER_CONFIG } from '$lib/nesting/optimizer';
+import {
+  optimize,
+  optimizeIterative,
+  hasStalled,
+  DEFAULT_OPTIMIZER_CONFIG,
+} from '$lib/nesting/optimizer';
 import type { Part } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -18,7 +23,14 @@ function makePart(id: string, w: number, h: number): Part {
   };
 }
 
-const fastConfig = { ...DEFAULT_OPTIMIZER_CONFIG, populationSize: 10, generations: 5 };
+// Convergence disarmed (stallWindow >= maxGenerations) so existing tests run a fixed count.
+const fastConfig = {
+  ...DEFAULT_OPTIMIZER_CONFIG,
+  populationSize: 10,
+  maxGenerations: 5,
+  stallWindow: 5,
+  stallEpsilon: 0.005,
+};
 
 // Seed Math.random for deterministic tests
 let origRandom: () => number;
@@ -76,7 +88,7 @@ describe('optimize', () => {
         calls.push({ gen, fitness });
       },
     );
-    expect(calls.length).toBe(fastConfig.generations);
+    expect(calls.length).toBe(fastConfig.maxGenerations);
     for (const c of calls) {
       expect(Number.isFinite(c.fitness)).toBe(true);
     }
@@ -99,7 +111,7 @@ describe('optimizeIterative', () => {
       expect(Number.isFinite(progress.bestFitness)).toBe(true);
       count++;
     }
-    expect(count).toBe(fastConfig.generations);
+    expect(count).toBe(fastConfig.maxGenerations);
   });
 
   it('returns final placement from generator return value', () => {
@@ -117,5 +129,99 @@ describe('optimizeIterative', () => {
     } while (!iter.done);
     expect(Array.isArray(result)).toBe(true);
     expect(result!.length).toBe(1);
+  });
+});
+
+describe('hasStalled', () => {
+  it('returns false when history is shorter than window + 1 (A8)', () => {
+    // window 3 needs 4 entries; only 3 present
+    expect(hasStalled([10, 9, 8], 3, 0.005)).toBe(false);
+    // empty / single-entry histories
+    expect(hasStalled([], 1, 0.005)).toBe(false);
+    expect(hasStalled([5], 1, 0.005)).toBe(false);
+  });
+
+  it('returns true when relative improvement over the window < epsilon', () => {
+    // prev = 100, curr = 100 -> improvement 0 < 0.005
+    expect(hasStalled([100, 100, 100, 100, 100, 100], 5, 0.005)).toBe(true);
+    // tiny improvement: 100 -> 99.99 over window => 0.0001 < 0.005
+    expect(hasStalled([100, 100, 100, 100, 100, 99.99], 5, 0.005)).toBe(true);
+  });
+
+  it('returns false when improvement >= epsilon', () => {
+    // prev = 100, curr = 90 over window 5 => 0.10 >= 0.005
+    expect(hasStalled([100, 99, 97, 95, 92, 90], 5, 0.005)).toBe(false);
+    // exactly equal to epsilon is not "< epsilon" => not stalled
+    expect(hasStalled([100, 99.5], 1, 0.005)).toBe(false);
+  });
+
+  it('returns a defined boolean with no NaN/Infinity when windowed-back value is near zero (A6)', () => {
+    const r = hasStalled([0, 0, 0], 2, 0.005);
+    expect(typeof r).toBe('boolean');
+    expect(Number.isNaN(r as unknown as number)).toBe(false);
+    // zero history is fully stalled
+    expect(r).toBe(true);
+  });
+
+  it('never reports stalled when epsilon <= 0', () => {
+    expect(hasStalled([100, 100, 100], 2, 0)).toBe(false);
+    expect(hasStalled([100, 100, 100], 2, -1)).toBe(false);
+    // even a zero-history (improvement 0) is not < 0
+    expect(hasStalled([0, 0, 0], 2, 0)).toBe(false);
+  });
+});
+
+describe('optimizeIterative convergence', () => {
+  // Stall-prone setup: small parts on a large sheet converge quickly.
+  const stallParts = [makePart('a', 5, 5), makePart('b', 5, 5), makePart('c', 5, 5)];
+  const sheet = { width: 100, height: 100 };
+
+  it('stops before maxGenerations on a stalling case and returns a non-empty placement (A6, A9)', () => {
+    const config = {
+      ...DEFAULT_OPTIMIZER_CONFIG,
+      populationSize: 10,
+      maxGenerations: 50,
+      stallWindow: 5,
+      stallEpsilon: 0.01,
+    };
+    const gen = optimizeIterative(stallParts, sheet, 0, config);
+    let count = 0;
+    let result;
+    let iter;
+    do {
+      iter = gen.next();
+      if (!iter.done) {
+        expect(iter.value).toHaveProperty('generation');
+        expect(iter.value).toHaveProperty('bestFitness');
+        expect(iter.value).toHaveProperty('bestPlacement');
+        count++;
+      } else {
+        result = iter.value;
+      }
+    } while (!iter.done);
+
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThan(config.maxGenerations);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result!.length).toBeGreaterThan(0);
+  });
+
+  it('yields exactly maxGenerations values when convergence is disarmed (A7)', () => {
+    const config = {
+      ...DEFAULT_OPTIMIZER_CONFIG,
+      populationSize: 10,
+      maxGenerations: 12,
+      stallWindow: 12, // >= maxGenerations => never triggers
+      stallEpsilon: 0.5,
+    };
+    const gen = optimizeIterative(stallParts, sheet, 0, config);
+    let count = 0;
+    for (const progress of gen) {
+      expect(progress).toHaveProperty('generation');
+      expect(progress).toHaveProperty('bestFitness');
+      expect(progress).toHaveProperty('bestPlacement');
+      count++;
+    }
+    expect(count).toBe(config.maxGenerations);
   });
 });

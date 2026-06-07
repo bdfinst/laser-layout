@@ -4,17 +4,34 @@ import { getStripHeight } from './stats';
 
 export interface OptimizerConfig {
   populationSize: number;
-  generations: number;
+  maxGenerations: number; // hard safety cap on generations
+  stallWindow: number; // generations without meaningful improvement before stopping
+  stallEpsilon: number; // minimum relative improvement that counts as progress
   mutationRate: number;
   rotationSteps: number; // e.g. 360 means 1° increments
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
   populationSize: 30,
-  generations: 50,
   mutationRate: 0.3,
   rotationSteps: 72, // 5° increments
+  maxGenerations: 200,
+  stallWindow: 15,
+  stallEpsilon: 0.005,
 };
+
+/**
+ * Pure convergence check. Returns true when the best fitness has not improved
+ * by at least `epsilon` (relative) over the last `window` generations.
+ * Lower fitness is better. Deterministic — no GA, no RNG.
+ */
+export function hasStalled(history: number[], window: number, epsilon: number): boolean {
+  if (history.length < window + 1) return false; // window guard (A8)
+  const prev = history[history.length - 1 - window];
+  const curr = history[history.length - 1];
+  const denom = Math.max(Math.abs(prev), 1e-9); // divide-by-zero guard (A6)
+  return (prev - curr) / denom < epsilon; // lower fitness is better
+}
 
 interface Individual {
   rotations: number[]; // rotation angle in radians for each part
@@ -66,8 +83,9 @@ export function* optimizeIterative(
   // Sort initial population
   population.sort((a, b) => a.fitness - b.fitness);
 
-  // Evolve
-  for (let gen = 0; gen < config.generations; gen++) {
+  // Evolve, stopping early when best fitness converges (bounded by the safety cap).
+  const history: number[] = [];
+  for (let gen = 0; gen < config.maxGenerations; gen++) {
     const nextGen: Individual[] = [];
 
     // Elitism: keep top 10% (population is already sorted)
@@ -96,6 +114,9 @@ export function* optimizeIterative(
     const best = population[0];
     const bestPlacement = placementFromIndividual(best, parts, sheet, kerf);
     yield { generation: gen, bestFitness: best.fitness, bestPlacement };
+
+    history.push(best.fitness);
+    if (hasStalled(history, config.stallWindow, config.stallEpsilon)) break;
   }
 
   // Population is already sorted from the last iteration
