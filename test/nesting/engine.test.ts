@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { nestParts, nestPartsIterative, computeMinimumSheet } from '$lib/nesting/engine';
+import {
+  nestParts,
+  nestPartsIterative,
+  computeMinimumSheet,
+  makeOptimizerConfig,
+} from '$lib/nesting/engine';
+import { optimizeIterative } from '$lib/nesting/optimizer';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
@@ -24,6 +30,10 @@ const fastConfig: NestingConfig = {
   rotationSteps: 4,
   populationSize: 5,
   generations: 3,
+  // Pin a small cap with convergence disarmed so fixed-count assertions hold.
+  maxGenerations: 3,
+  stallWindow: 3,
+  stallEpsilon: 0.005,
 };
 
 let origRandom: () => number;
@@ -131,6 +141,77 @@ describe('nestPartsIterative', () => {
     } while (!iter.done);
     expect(iter.value.sheets).toHaveLength(1);
     expect(iter.value.totalPlaced).toBe(1);
+  });
+});
+
+describe('makeOptimizerConfig', () => {
+  const base: NestingConfig = {
+    sheet: { width: 100, height: 100 },
+    kerf: 0,
+    rotationSteps: 8,
+    populationSize: 20,
+    generations: 50,
+  };
+
+  it('defaults omitted convergence fields (A10)', () => {
+    const opt = makeOptimizerConfig(base);
+    // maxGenerations = max(generations, 200)
+    expect(opt.maxGenerations).toBe(200);
+    expect(opt.stallWindow).toBe(15);
+    expect(opt.stallEpsilon).toBe(0.005);
+    // passthrough of existing fields
+    expect(opt.populationSize).toBe(20);
+    expect(opt.rotationSteps).toBe(8);
+    expect(opt.mutationRate).toBe(0.3);
+  });
+
+  it('uses generations as the cap baseline when larger than 200', () => {
+    const opt = makeOptimizerConfig({ ...base, generations: 500 });
+    expect(opt.maxGenerations).toBe(500);
+  });
+
+  it('passes through provided convergence values (A10)', () => {
+    const opt = makeOptimizerConfig({
+      ...base,
+      stallWindow: 7,
+      stallEpsilon: 0.02,
+      maxGenerations: 123,
+    });
+    expect(opt.maxGenerations).toBe(123);
+    expect(opt.stallWindow).toBe(7);
+    expect(opt.stallEpsilon).toBe(0.02);
+  });
+
+  it('handles partial overrides (A10)', () => {
+    const opt = makeOptimizerConfig({ ...base, stallWindow: 3 });
+    expect(opt.stallWindow).toBe(3);
+    expect(opt.stallEpsilon).toBe(0.005);
+    expect(opt.maxGenerations).toBe(200);
+  });
+
+  it('produces a terminating optimizer for degenerate configs (A10)', () => {
+    const parts = [makePart('a', 5, 5), makePart('b', 5, 5)];
+    const sheet = { width: 100, height: 100 };
+    const degenerates: NestingConfig[] = [
+      { ...base, generations: 5, stallWindow: 0, maxGenerations: 5 },
+      { ...base, generations: 5, stallWindow: 1, maxGenerations: 5 },
+      { ...base, generations: 5, stallWindow: 99, maxGenerations: 5 },
+      { ...base, generations: 5, stallEpsilon: 0, maxGenerations: 5 },
+      { ...base, generations: 5, stallEpsilon: -1, maxGenerations: 5 },
+    ];
+    for (const cfg of degenerates) {
+      const opt = makeOptimizerConfig(cfg);
+      const gen = optimizeIterative(parts, sheet, 0, opt);
+      let count = 0;
+      let iter;
+      do {
+        iter = gen.next();
+        if (!iter.done) count++;
+      } while (!iter.done);
+      // Always terminates within maxGenerations and yields at least one progress value.
+      expect(count).toBeGreaterThanOrEqual(1);
+      expect(count).toBeLessThanOrEqual(opt.maxGenerations);
+    }
   });
 });
 

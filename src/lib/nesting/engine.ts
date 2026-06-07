@@ -56,12 +56,14 @@ function simplifyPartsForNesting(parts: Part[]): Part[] {
   }));
 }
 
-function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
+export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
   return {
     populationSize: config.populationSize,
-    generations: config.generations,
-    mutationRate: 0.3,
     rotationSteps: config.rotationSteps,
+    mutationRate: 0.3,
+    maxGenerations: config.maxGenerations ?? Math.max(config.generations, 200),
+    stallWindow: config.stallWindow ?? 15,
+    stallEpsilon: config.stallEpsilon ?? 0.005,
   };
 }
 
