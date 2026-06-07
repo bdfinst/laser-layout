@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { bottomLeftFill } from '$lib/nesting/placement';
-import type { Part, MaterialSheet } from '$lib/geometry/types';
+import { getPlacedPolygons, boundingBox } from '$lib/geometry/polygon';
+import { polygonsOverlap } from '$lib/nesting/nfp';
+import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 
 function makePart(id: string, w: number, h: number): Part {
   return {
@@ -251,5 +253,150 @@ describe('hole-aware placement', () => {
     expect(result).toHaveLength(2);
     expect(result[0].x).toBeCloseTo(0);
     expect(result[0].y).toBeCloseTo(0);
+  });
+});
+
+describe('gap-filling placement', () => {
+  // Coarse-step slide granularity is step = max(1, min(partW, partH) / 4).
+  // For the 20x50 filler below that is max(1, 20/4) = 5, so all fixture
+  // coordinates are multiples of 5 and the pocket floor is reachable.
+
+  it('tucks a part into an interior gap instead of a higher corner (concrete fixture)', () => {
+    // A wide sheet so corners exist; H tall so strip height has room to grow.
+    const gapSheet: MaterialSheet = { width: 100, height: 200 };
+
+    // Deterministic layout (verified against the placement model):
+    //   A 30x40 -> (0,0)-(30,40)
+    //   B 60x10 -> (30,0)-(90,10)
+    //   C 20x30 -> (30,10)-(50,40)
+    //   D 60x60 -> (0,40)-(60,100)
+    // This leaves an interior pocket to the right of C / above B at x in [60,90],
+    // y in [10,40] (floor = top of B at y=10). The only corner anchor the legacy
+    // engine reaches for the next part sits at y=40 (to the right of D), which is
+    // strictly higher than the pocket floor.
+    const filler = makePart('filler', 20, 50); // fits the pocket width (20) and slides to y=10
+    const parts = [
+      { part: makePart('A', 30, 40), rotation: 0 },
+      { part: makePart('B', 60, 10), rotation: 0 },
+      { part: makePart('C', 20, 30), rotation: 0 },
+      { part: makePart('D', 60, 60), rotation: 0 },
+      { part: filler, rotation: 0 },
+    ];
+
+    const result = bottomLeftFill(parts, gapSheet);
+    expect(result).toHaveLength(5);
+
+    const stripBeforeFiller = Math.max(
+      ...result.slice(0, 4).map((pp) => pp.y + boundingBox(getPlacedPolygons(pp)[0]).height),
+    );
+    const fillerPlaced = result[4];
+
+    // The filler is tucked into the low interior pocket, not the y=40 corner.
+    expect(fillerPlaced.y).toBeCloseTo(10);
+
+    // And it does not raise the overall strip height.
+    const stripAfter = Math.max(
+      ...result.map((pp) => pp.y + boundingBox(getPlacedPolygons(pp)[0]).height),
+    );
+    expect(stripAfter).toBeLessThanOrEqual(stripBeforeFiller + 1e-6);
+  });
+
+  // (b) Property-style, parameterized by kerf.
+  const partSets: { name: string; dims: [number, number][] }[] = [
+    {
+      name: 'mixed small',
+      dims: [
+        [30, 40],
+        [60, 10],
+        [20, 30],
+        [60, 60],
+        [20, 50],
+      ],
+    },
+    {
+      name: 'uniform squares',
+      dims: Array.from({ length: 9 }, () => [20, 20] as [number, number]),
+    },
+    {
+      name: 'tall and wide mix',
+      dims: [
+        [10, 50],
+        [50, 10],
+        [30, 30],
+        [40, 20],
+        [20, 40],
+        [10, 10],
+      ],
+    },
+    {
+      name: 'descending widths',
+      dims: [
+        [60, 20],
+        [50, 20],
+        [40, 20],
+        [30, 20],
+        [20, 20],
+      ],
+    },
+  ];
+
+  for (const { name, dims } of partSets) {
+    for (const kerf of [0, 3]) {
+      it(`no invalid placements for "${name}" at kerf=${kerf} (A3)`, () => {
+        const propSheet: MaterialSheet = { width: 120, height: 240 };
+        const parts = dims.map(([w, h], i) => ({
+          part: makePart(`${name}-${i}`, w, h),
+          rotation: 0,
+        }));
+        const result = bottomLeftFill(parts, propSheet, kerf);
+
+        // Every placed part is fully within the sheet.
+        for (const pp of result) {
+          const bb = boundingBox(getPlacedPolygons(pp)[0]);
+          expect(bb.minX).toBeGreaterThanOrEqual(-1e-6);
+          expect(bb.minY).toBeGreaterThanOrEqual(-1e-6);
+          expect(bb.maxX).toBeLessThanOrEqual(propSheet.width + 1e-6);
+          expect(bb.maxY).toBeLessThanOrEqual(propSheet.height + 1e-6);
+        }
+
+        for (let i = 0; i < result.length; i++) {
+          for (let j = i + 1; j < result.length; j++) {
+            const a = result[i] as PlacedPart;
+            const b = result[j] as PlacedPart;
+            if (kerf === 0) {
+              // No two placed polygons overlap (bbox overlap is permitted).
+              expect(polygonsOverlap(getPlacedPolygons(a)[0], getPlacedPolygons(b)[0])).toBe(false);
+            } else {
+              // Every pair of bounding boxes is separated by >= kerf.
+              const ba = boundingBox(getPlacedPolygons(a)[0]);
+              const bb = boundingBox(getPlacedPolygons(b)[0]);
+              const sepX = Math.max(ba.minX - bb.maxX, bb.minX - ba.maxX);
+              const sepY = Math.max(ba.minY - bb.maxY, bb.minY - ba.maxY);
+              expect(Math.max(sepX, sepY)).toBeGreaterThanOrEqual(kerf - 1e-6);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  // (c) Hole placement remains highest priority.
+  it('hole placement still wins over gap filling when a hole fits', () => {
+    const ring = makePartWithHole('ring', 50, 50, 5, 5, 40, 40);
+    const small = makePart('small', 10, 10);
+    const result = bottomLeftFill(
+      [
+        { part: ring, rotation: 0 },
+        { part: small, rotation: 0 },
+      ],
+      sheet,
+    );
+    expect(result).toHaveLength(2);
+    const sp = result[1];
+    // Placed inside the ring's hole, not slid into some exterior gap.
+    expect(sp.x).toBeGreaterThanOrEqual(5);
+    expect(sp.y).toBeGreaterThanOrEqual(5);
+    expect(sp.x + 10).toBeLessThanOrEqual(45);
+    expect(sp.y + 10).toBeLessThanOrEqual(45);
   });
 });

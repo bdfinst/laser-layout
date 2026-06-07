@@ -175,6 +175,67 @@ function tryHolePlacement(
   return { position: { x: best.x, y: best.y }, hole: best.hole };
 }
 
+/**
+ * Generate candidate anchor positions around a single placed part. Includes the
+ * legacy bounding-box corners (to the right of / above the part) plus interior-gap
+ * anchors that sit to the LEFT of and BELOW the part, so a later part can settle
+ * into a pocket rather than only at exterior corners.
+ */
+function candidateAnchors(
+  cp: CachedPlacement,
+  partBB: { width: number; height: number },
+  kerf: number,
+): Point[] {
+  return [
+    // Legacy corners: right of / above the placed part.
+    { x: cp.bb.maxX + kerf, y: cp.bb.minY },
+    { x: cp.bb.minX, y: cp.bb.maxY + kerf },
+    { x: cp.bb.maxX + kerf, y: cp.bb.maxY + kerf },
+    { x: cp.bb.maxX + kerf, y: 0 },
+    { x: 0, y: cp.bb.maxY + kerf },
+    // Interior-gap anchors: left of the placed part (bottom- and top-aligned).
+    { x: cp.bb.minX - kerf - partBB.width, y: cp.bb.minY },
+    { x: cp.bb.minX - kerf - partBB.width, y: cp.bb.maxY - partBB.height },
+    // Interior-gap anchors: below the placed part (left- and right-aligned).
+    { x: cp.bb.minX, y: cp.bb.minY - kerf - partBB.height },
+    { x: cp.bb.maxX - partBB.width, y: cp.bb.minY - kerf - partBB.height },
+  ];
+}
+
+/**
+ * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
+ * step down while still collision-free, then step left while still collision-free.
+ * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
+ * can never leave the sheet or create an overlap. Step and iteration count are both
+ * bounded so cost stays controlled (bottomLeftFill runs once per GA individual).
+ */
+function slideBottomLeft(
+  poly: Polygon,
+  x: number,
+  y: number,
+  partBB: { width: number; height: number },
+  cache: CachedPlacement[],
+  sheet: MaterialSheet,
+  kerf: number,
+): Point {
+  const step = Math.max(1, Math.min(partBB.width, partBB.height) / 4);
+  const MAX_STEPS = 1000;
+
+  let cx = x;
+  let cy = y;
+
+  let i = 0;
+  while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
+    cy -= step;
+  }
+  i = 0;
+  while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
+    cx -= step;
+  }
+
+  return { x: cx, y: cy };
+}
+
 function tryAdjacentPositions(
   normalizedPoly: Polygon,
   partBB: { width: number; height: number },
@@ -185,15 +246,7 @@ function tryAdjacentPositions(
   const candidates: { x: number; y: number; score: number }[] = [];
 
   for (const cp of cache) {
-    const positions = [
-      { x: cp.bb.maxX + kerf, y: cp.bb.minY },
-      { x: cp.bb.minX, y: cp.bb.maxY + kerf },
-      { x: cp.bb.maxX + kerf, y: cp.bb.maxY + kerf },
-      { x: cp.bb.maxX + kerf, y: 0 },
-      { x: 0, y: cp.bb.maxY + kerf },
-    ];
-
-    for (const pos of positions) {
+    for (const pos of candidateAnchors(cp, partBB, kerf)) {
       if (
         pos.x >= 0 &&
         pos.y >= 0 &&
@@ -201,7 +254,10 @@ function tryAdjacentPositions(
         pos.y + partBB.height <= sheet.height &&
         !hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)
       ) {
-        candidates.push({ ...pos, score: pos.y * sheet.width + pos.x });
+        // Pull the candidate toward the origin so it settles into any open gap
+        // beneath/left of it that does not raise the strip height.
+        const slid = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
+        candidates.push({ ...slid, score: slid.y * sheet.width + slid.x });
       }
     }
   }
