@@ -22,7 +22,7 @@ export interface ProjectState {
 }
 
 const DEFAULT_CONFIG: NestingConfig = {
-  sheet: { width: 300, height: 300 },
+  sheet: { width: 762, height: 762 }, // 30 in (762 mm) square — default stock size
   kerf: 1,
   rotationSteps: 72,
   populationSize: 30,
