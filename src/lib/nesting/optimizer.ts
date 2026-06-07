@@ -71,14 +71,19 @@ export function hasStalled(history: number[], window: number, epsilon: number): 
 interface Individual {
   rotations: number[]; // rotation angle in radians for each part
   order: number[]; // placement order (indices into parts array)
+  mirrors: boolean[]; // reflection flag for each part (#15)
   fitness: number; // lower is better (open-area ratio + unplaced penalty)
   placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
 }
 
-function toOrderedParts(individual: Individual, parts: Part[]): { part: Part; rotation: number }[] {
+function toOrderedParts(
+  individual: Individual,
+  parts: Part[],
+): { part: Part; rotation: number; mirror: boolean }[] {
   return individual.order.map((idx, i) => ({
     part: parts[idx],
     rotation: individual.rotations[i],
+    mirror: individual.mirrors[i],
   }));
 }
 
@@ -118,6 +123,7 @@ export function* optimizeIterative(
   const noRotation: Individual = {
     rotations: new Array(n).fill(0),
     order: Array.from({ length: n }, (_, i) => i),
+    mirrors: new Array(n).fill(false),
     fitness: 0,
     placement: [],
   };
@@ -130,6 +136,7 @@ export function* optimizeIterative(
     const seeded: Individual = {
       rotations: new Array(n).fill(0),
       order: seeds[s],
+      mirrors: new Array(n).fill(false),
       fitness: 0,
       placement: [],
     };
@@ -215,7 +222,9 @@ function createRandomIndividual(n: number, angleStep: number, rotationSteps: num
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  const mirrors = Array.from({ length: n }, () => Math.random() < 0.5);
+
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }
 
 function evaluate(
@@ -249,10 +258,13 @@ function crossover(parent1: Individual, parent2: Individual, n: number): Individ
     Math.random() < 0.5 ? r : parent2.rotations[i],
   );
 
+  // Uniform crossover for mirror flags (by position, like rotations)
+  const mirrors = parent1.mirrors.map((m, i) => (Math.random() < 0.5 ? m : parent2.mirrors[i]));
+
   // Order crossover (OX) for placement order
   const order = orderCrossover(parent1.order, parent2.order, n);
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }
 
 function orderCrossover(p1: number[], p2: number[], n: number): number[] {
@@ -284,12 +296,17 @@ function orderCrossover(p1: number[], p2: number[], n: number): number[] {
 function mutate(individual: Individual, angleStep: number, rotationSteps: number): Individual {
   const rotations = [...individual.rotations];
   const order = [...individual.order];
+  const mirrors = [...individual.mirrors];
   const n = rotations.length;
 
   // Mutate rotation of a random part
   const rotIdx = Math.floor(Math.random() * n);
   const step = Math.floor(Math.random() * rotationSteps);
   rotations[rotIdx] = step * angleStep;
+
+  // Flip the mirror flag of a random part (#15)
+  const mirIdx = Math.floor(Math.random() * n);
+  mirrors[mirIdx] = !mirrors[mirIdx];
 
   // Swap two random positions in order
   if (n > 1) {
@@ -299,5 +316,5 @@ function mutate(individual: Individual, angleStep: number, rotationSteps: number
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  return { rotations, order, fitness: Infinity, placement: [] };
+  return { rotations, order, mirrors, fitness: Infinity, placement: [] };
 }

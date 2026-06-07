@@ -4,6 +4,7 @@ import {
   rotatePolygon,
   translatePolygon,
   transformPartPolygons,
+  reflectPolygon,
 } from '$lib/geometry/polygon';
 import type { BoundingBox } from '$lib/geometry/types';
 import {
@@ -35,7 +36,7 @@ interface PlacementResult {
 }
 
 export function bottomLeftFill(
-  parts: { part: Part; rotation: number }[],
+  parts: { part: Part; rotation: number; mirror?: boolean }[],
   sheet: MaterialSheet,
   kerf: number = 0,
 ): PlacedPart[] {
@@ -43,8 +44,8 @@ export function bottomLeftFill(
   const cache: CachedPlacement[] = [];
   let holes: CachedHole[] = [];
 
-  for (const { part, rotation } of parts) {
-    const outerPoly = part.polygons[0];
+  for (const { part, rotation, mirror } of parts) {
+    const outerPoly = mirror ? reflectPolygon(part.polygons[0]) : part.polygons[0];
     const rotated = rotatePolygon(outerPoly, rotation);
     const bb = boundingBox(rotated);
     const normalized = translatePolygon(rotated, -bb.minX, -bb.minY);
@@ -64,7 +65,7 @@ export function bottomLeftFill(
       kerf,
     );
     if (result) {
-      const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation };
+      const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation, mirror };
       placed.push(pp);
       const finalPoly = translatePolygon(normalized, result.position.x, result.position.y);
       const finalBB: BoundingBox = {
@@ -82,7 +83,14 @@ export function bottomLeftFill(
         result.hole.innerPlacements.push(cp);
       } else {
         // Only extract holes from parts placed on the sheet (no recursive nesting)
-        const newHoles = extractHoles(part, rotation, result.position, cache.length - 1, kerf);
+        const newHoles = extractHoles(
+          part,
+          rotation,
+          result.position,
+          cache.length - 1,
+          kerf,
+          mirror,
+        );
         holes = [...holes, ...newHoles];
       }
     }
@@ -97,12 +105,19 @@ function extractHoles(
   position: Point,
   sourcePlacementIndex: number,
   kerf: number,
+  mirror?: boolean,
 ): CachedHole[] {
   if (part.polygons.length <= 1) return [];
 
   // Transform the whole part as a rigid body so holes keep their position
   // relative to the outer boundary (index 0 = outer boundary, 1.. = holes).
-  const placedPolys = transformPartPolygons(part.polygons, rotation, position.x, position.y);
+  const placedPolys = transformPartPolygons(
+    part.polygons,
+    rotation,
+    position.x,
+    position.y,
+    mirror,
+  );
   const result: CachedHole[] = [];
 
   for (let i = 1; i < placedPolys.length; i++) {
