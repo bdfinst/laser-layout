@@ -115,7 +115,7 @@ export function* optimizeIterative(
   let population: Individual[] = [];
   for (let i = 0; i < config.populationSize; i++) {
     const individual = createRandomIndividual(n, angleStep, config.rotationSteps);
-    individual.fitness = evaluate(individual, parts, sheet, kerf);
+    individual.fitness = evaluate(individual, parts, sheet, kerf, false);
     population.push(individual);
   }
 
@@ -127,7 +127,7 @@ export function* optimizeIterative(
     fitness: 0,
     placement: [],
   };
-  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf);
+  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false);
   population[0] = noRotation;
 
   // Seed a few individuals with biggest-first heuristic orderings (#13).
@@ -140,35 +140,39 @@ export function* optimizeIterative(
       fitness: 0,
       placement: [],
     };
-    seeded.fitness = evaluate(seeded, parts, sheet, kerf);
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false);
     population[s + 1] = seeded;
   }
 
   // Sort initial population
   population.sort((a, b) => a.fitness - b.fitness);
 
-  // Evolve, stopping early when best fitness converges (bounded by the safety cap).
+  // Two-phase evolution (#19). The exact true-shape collision (#11/#12) that makes packing
+  // tight is ~35x costlier than the bbox approximation, so running it on every evaluation of
+  // the broad search is too slow. Instead: search with FAST (bbox) collision until it
+  // converges, then spend a short tail of generations refining with EXACT collision — long
+  // enough for the GA to discover interlocking placements, cheap enough to stay fast. Total
+  // generations stay bounded by maxGenerations.
+  const eliteCount = Math.max(1, Math.floor(config.populationSize * 0.1));
+  const exactBudget = Math.max(1, Math.min(12, Math.floor(config.maxGenerations / 4)));
+  const fastCap = config.maxGenerations - exactBudget;
   const history: number[] = [];
-  for (let gen = 0; gen < config.maxGenerations; gen++) {
+  let exact = false;
+  let exactGens = 0;
+  let gen = 0;
+
+  while (true) {
     const nextGen: Individual[] = [];
+    for (let i = 0; i < eliteCount; i++) nextGen.push(population[i]);
 
-    // Elitism: keep top 10% (population is already sorted)
-    const eliteCount = Math.max(1, Math.floor(config.populationSize * 0.1));
-    for (let i = 0; i < eliteCount; i++) {
-      nextGen.push(population[i]);
-    }
-
-    // Fill rest with crossover + mutation
     while (nextGen.length < config.populationSize) {
       const parent1 = tournamentSelect(population);
       const parent2 = tournamentSelect(population);
       let child = crossover(parent1, parent2, n);
-
       if (Math.random() < config.mutationRate) {
         child = mutate(child, angleStep, config.rotationSteps);
       }
-
-      child.fitness = evaluate(child, parts, sheet, kerf);
+      child.fitness = evaluate(child, parts, sheet, kerf, exact);
       nextGen.push(child);
     }
 
@@ -176,14 +180,32 @@ export function* optimizeIterative(
     population.sort((a, b) => a.fitness - b.fitness);
 
     const best = population[0];
-    // best.placement was cached by evaluate() — no need to re-run bottomLeftFill here.
+    // best.placement was cached by evaluate() in the current collision mode.
     yield { generation: gen, bestFitness: best.fitness, bestPlacement: best.placement };
-
+    gen++;
     history.push(best.fitness);
-    if (hasStalled(history, config.stallWindow, config.stallEpsilon)) break;
+
+    if (!exact) {
+      if (hasStalled(history, config.stallWindow, config.stallEpsilon) || gen >= fastCap) {
+        // Switch to exact refinement: re-score the whole population with true-shape
+        // collision so fitness is comparable, then reset the stall window.
+        for (const ind of population) ind.fitness = evaluate(ind, parts, sheet, kerf, true);
+        population.sort((a, b) => a.fitness - b.fitness);
+        exact = true;
+        history.length = 0;
+      }
+    } else {
+      exactGens++;
+      if (
+        exactGens >= exactBudget ||
+        hasStalled(history, config.stallWindow, config.stallEpsilon)
+      ) {
+        break;
+      }
+    }
   }
 
-  // Population is already sorted from the last iteration
+  // population[0] was scored with exact collision; its cached placement is the tight result.
   return population[0].placement;
 }
 
@@ -232,9 +254,10 @@ function evaluate(
   parts: Part[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): number {
-  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf);
-  individual.placement = placed; // cache for progress reporting / final return
+  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact);
+  individual.placement = placed; // cache for progress reporting
   const stats = openAreaStats(placed, sheet);
   const unplacedCount = parts.length - placed.length;
 
