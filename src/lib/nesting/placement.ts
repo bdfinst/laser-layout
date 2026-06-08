@@ -39,6 +39,7 @@ export function bottomLeftFill(
   parts: { part: Part; rotation: number; mirror?: boolean }[],
   sheet: MaterialSheet,
   kerf: number = 0,
+  exact: boolean = true,
 ): PlacedPart[] {
   const placed: PlacedPart[] = [];
   const cache: CachedPlacement[] = [];
@@ -63,6 +64,7 @@ export function bottomLeftFill(
       holes,
       sheet,
       kerf,
+      exact,
     );
     if (result) {
       const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation, mirror };
@@ -147,6 +149,7 @@ function tryHolePlacement(
   partBB: { width: number; height: number },
   holes: CachedHole[],
   kerf: number,
+  exact: boolean,
 ): PlacementResult | null {
   const holeCandidates: { x: number; y: number; score: number; hole: CachedHole }[] = [];
 
@@ -178,7 +181,7 @@ function tryHolePlacement(
         width: partBB.width,
         height: partBB.height,
       };
-      if (checkOverlap(translated, translatedBB, hole.innerPlacements, kerf)) continue;
+      if (checkOverlap(translated, translatedBB, hole.innerPlacements, kerf, exact)) continue;
 
       const holeArea = hole.holeBB.width * hole.holeBB.height;
       holeCandidates.push({ ...pos, score: -1e9 + holeArea, hole });
@@ -252,6 +255,7 @@ function slideBottomLeft(
   cache: CachedPlacement[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): Point {
   const step = Math.max(1, Math.min(partBB.width, partBB.height) / 4);
   // Bound iterations to what the sheet can physically accommodate (never more than the
@@ -269,11 +273,11 @@ function slideBottomLeft(
     const prevX = cx;
     const prevY = cy;
     let i = 0;
-    while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf)) {
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf, exact)) {
       cy -= step;
     }
     i = 0;
-    while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf)) {
+    while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf, exact)) {
       cx -= step;
     }
     if (cx === prevX && cy === prevY) break; // converged
@@ -288,6 +292,7 @@ function tryAdjacentPositions(
   cache: CachedPlacement[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): PlacementResult | null {
   // Generate candidate positions (cheap): bbox corners + interior-gap anchors (gap-fill)
   // + concavity anchors (#12 — seat the part's corners at placed parts' reflex/notch
@@ -300,8 +305,11 @@ function tryAdjacentPositions(
   for (const cp of cache) {
     for (const pos of candidateAnchors(cp, partBB, kerf))
       positions.push({ ...pos, score: score(pos.x, pos.y) });
-    for (const pos of concavityAnchors(cp, partBB))
-      positions.push({ ...pos, score: score(pos.x, pos.y) });
+    // Concavity anchors only matter under exact collision (bbox approximation rejects
+    // them anyway), so skip them during the fast GA search.
+    if (exact)
+      for (const pos of concavityAnchors(cp, partBB))
+        positions.push({ ...pos, score: score(pos.x, pos.y) });
   }
 
   // Keep only in-sheet positions, prefer the lowest (bottom-left), and validate at most
@@ -323,12 +331,12 @@ function tryAdjacentPositions(
   let slid = 0;
   for (const pos of inSheet) {
     if (validated >= VALIDATE_BUDGET) break;
-    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf)) continue;
+    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf, exact)) continue;
     validated++;
     // Slide only the first few collision-free candidates toward the origin.
     if (slid < SLIDE_BUDGET) {
       slid++;
-      const s = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf);
+      const s = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf, exact);
       const sc = score(s.x, s.y);
       if (!best || sc < best.score) best = { x: s.x, y: s.y, score: sc };
     } else if (!best || pos.score < best.score) {
@@ -345,6 +353,7 @@ function tryGridFallback(
   cache: CachedPlacement[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): PlacementResult | null {
   const maxX = sheet.width - partBB.width;
   const maxY = sheet.height - partBB.height;
@@ -352,7 +361,7 @@ function tryGridFallback(
 
   for (let y = 0; y <= maxY; y += step) {
     for (let x = 0; x <= maxX; x += step) {
-      if (!hasCollision(normalizedPoly, x, y, cache, sheet, kerf)) {
+      if (!hasCollision(normalizedPoly, x, y, cache, sheet, kerf, exact)) {
         return { position: { x, y }, hole: null };
       }
     }
@@ -368,22 +377,23 @@ function findBestPosition(
   holes: CachedHole[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): PlacementResult | null {
   // Phase 0: Try placing inside holes (always preferred — doesn't increase strip height)
-  const holeResult = tryHolePlacement(normalizedPoly, partBB, holes, kerf);
+  const holeResult = tryHolePlacement(normalizedPoly, partBB, holes, kerf, exact);
   if (holeResult) return holeResult;
 
   // Phase 1: Try origin first (common fast path for first part)
-  if (!hasCollision(normalizedPoly, 0, 0, cache, sheet, kerf)) {
+  if (!hasCollision(normalizedPoly, 0, 0, cache, sheet, kerf, exact)) {
     return { position: { x: 0, y: 0 }, hole: null };
   }
 
   // Phase 2: Try positions adjacent to already-placed parts
-  const adjacentResult = tryAdjacentPositions(normalizedPoly, partBB, cache, sheet, kerf);
+  const adjacentResult = tryAdjacentPositions(normalizedPoly, partBB, cache, sheet, kerf, exact);
   if (adjacentResult) return adjacentResult;
 
   // Phase 3: Fallback coarse grid scan
-  return tryGridFallback(normalizedPoly, partBB, cache, sheet, kerf);
+  return tryGridFallback(normalizedPoly, partBB, cache, sheet, kerf, exact);
 }
 
 // --- Collision detection ---
@@ -394,6 +404,7 @@ function checkOverlap(
   translatedBB: BoundingBox,
   placements: CachedPlacement[],
   kerf: number,
+  exact: boolean,
 ): boolean {
   for (const cp of placements) {
     if (
@@ -405,10 +416,12 @@ function checkOverlap(
       continue;
     }
 
-    // kerf > 0: true-shape spacing — parts may approach until their actual outlines are
-    // `kerf` apart (the bbox test above is only a cheap pre-filter). kerf == 0: exact
-    // overlap. (#11 — replaces the old bbox-overlap approximation for kerf > 0.)
+    // kerf > 0, exact: true-shape spacing — parts may approach until their actual outlines
+    // are `kerf` apart (#11). kerf > 0, not exact: fast bounding-box approximation (any
+    // bbox overlap within kerf is a collision) — used during GA search; the final
+    // committed placement is re-run exact (#19). kerf == 0: exact polygon overlap.
     if (kerf > 0) {
+      if (!exact) return true; // fast bbox approximation
       if (polygonsCloserThan(translatedPoly, cp.polygon, kerf)) return true;
       continue;
     }
@@ -428,6 +441,7 @@ function hasCollision(
   cache: CachedPlacement[],
   sheet: MaterialSheet,
   kerf: number,
+  exact: boolean,
 ): boolean {
   const translated = translatePolygon(poly, x, y);
   const bb = boundingBox(translated);
@@ -436,5 +450,5 @@ function hasCollision(
     return true;
   }
 
-  return checkOverlap(translated, bb, cache, kerf);
+  return checkOverlap(translated, bb, cache, kerf, exact);
 }
