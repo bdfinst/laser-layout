@@ -102,6 +102,7 @@ export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
     maxGenerations: config.maxGenerations ?? Math.max(config.generations * 3, 120),
     stallWindow: config.stallWindow ?? 15,
     stallEpsilon: config.stallEpsilon ?? 0.005,
+    useNfpPlacement: config.useNfpPlacement ?? false,
   };
 }
 

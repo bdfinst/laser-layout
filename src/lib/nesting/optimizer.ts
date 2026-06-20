@@ -2,6 +2,7 @@ import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 import { boundingBox } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
 import { openAreaStats } from './stats';
+import { createNfpCache, type NfpCache } from './nfp-cache';
 
 /**
  * Deterministic "biggest-first" seed orderings for the initial GA population.
@@ -44,6 +45,7 @@ export interface OptimizerConfig {
   stallEpsilon: number; // minimum relative improvement that counts as progress
   mutationRate: number;
   rotationSteps: number; // e.g. 360 means 1° increments
+  useNfpPlacement?: boolean; // opt-in NFP placement path (epic #24, P3–P5); default off
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
@@ -111,11 +113,17 @@ export function* optimizeIterative(
   const n = parts.length;
   const angleStep = (2 * Math.PI) / config.rotationSteps;
 
+  // One NFP cache for the whole sheet (epic #24), only when the NFP placement path is
+  // enabled. Translation-invariant and keyed by shape signature, so it amortizes across
+  // every exact-phase evaluation; the fast phase never touches it. `null` ⇒ the legacy
+  // placement path runs unchanged. Discarded with this generator when the sheet is done.
+  const nfpCache: NfpCache | null = config.useNfpPlacement ? createNfpCache() : null;
+
   // Initialize population
   let population: Individual[] = [];
   for (let i = 0; i < config.populationSize; i++) {
     const individual = createRandomIndividual(n, angleStep, config.rotationSteps);
-    individual.fitness = evaluate(individual, parts, sheet, kerf, false);
+    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache);
     population.push(individual);
   }
 
@@ -127,7 +135,7 @@ export function* optimizeIterative(
     fitness: 0,
     placement: [],
   };
-  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false);
+  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache);
   population[0] = noRotation;
 
   // Seed a few individuals with biggest-first heuristic orderings (#13).
@@ -140,7 +148,7 @@ export function* optimizeIterative(
       fitness: 0,
       placement: [],
     };
-    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false);
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache);
     population[s + 1] = seeded;
   }
 
@@ -172,7 +180,7 @@ export function* optimizeIterative(
       if (Math.random() < config.mutationRate) {
         child = mutate(child, angleStep, config.rotationSteps);
       }
-      child.fitness = evaluate(child, parts, sheet, kerf, exact);
+      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache);
       nextGen.push(child);
     }
 
@@ -189,7 +197,8 @@ export function* optimizeIterative(
       if (hasStalled(history, config.stallWindow, config.stallEpsilon) || gen >= fastCap) {
         // Switch to exact refinement: re-score the whole population with true-shape
         // collision so fitness is comparable, then reset the stall window.
-        for (const ind of population) ind.fitness = evaluate(ind, parts, sheet, kerf, true);
+        for (const ind of population)
+          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache);
         population.sort((a, b) => a.fitness - b.fitness);
         exact = true;
         history.length = 0;
@@ -255,8 +264,9 @@ function evaluate(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCache: NfpCache | null = null,
 ): number {
-  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact);
+  const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact, nfpCache);
   individual.placement = placed; // cache for progress reporting
   const stats = openAreaStats(placed, sheet);
   const unplacedCount = parts.length - placed.length;

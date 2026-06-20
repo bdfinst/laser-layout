@@ -13,12 +13,20 @@ import {
   reflexVertices,
   insetPolygon as computeInsetPolygon,
   polygonContainsPolygon,
+  pointInPolygon,
 } from './nfp';
+import type { NfpCache } from './nfp-cache';
 
 interface CachedPlacement {
   pp: PlacedPart;
   polygon: Polygon;
   bb: BoundingBox;
+  // Outer polygon normalized to the origin (bbox min at 0,0), placed at (bb.minX, bb.minY).
+  // Used as the *static* polygon when computing this part's NFP against a moving part.
+  localPoly: Polygon;
+  // Geometry signature of localPoly — the NFP cache key component (instance-unifying:
+  // identical shapes at the same rotation share one cached NFP). Empty when NFP is off.
+  sig: string;
 }
 
 interface CachedHole {
@@ -35,15 +43,81 @@ interface PlacementResult {
   hole: CachedHole | null;
 }
 
+/**
+ * Per-nest NFP context for the part currently being placed (epic #24, P3–P5). Present
+ * only on the EXACT collision path with a cache supplied; absent (`undefined`) for the
+ * fast bbox search and for all callers that don't opt in, so their behavior is byte-for-
+ * byte unchanged. `movingPoly` is the moving part's outer polygon normalized to origin.
+ */
+interface NfpCtx {
+  cache: NfpCache;
+  movingSig: string;
+  movingPoly: Polygon;
+}
+
+const NFP_EPS = 1e-6;
+
+/** Quantized vertex signature — stable, instance-unifying NFP cache key for a polygon. */
+function polySignature(poly: Polygon): string {
+  let s = '';
+  for (let i = 0; i < poly.length; i++) {
+    s += Math.round(poly[i].x * 64) + ',' + Math.round(poly[i].y * 64) + ';';
+  }
+  return s;
+}
+
+/** Fetch (and cache) the NFP of a placed part (static) vs the moving part (orbiting). */
+function nfpFor(ctx: NfpCtx, cp: CachedPlacement): Polygon | null {
+  if (!cp.sig) return null;
+  return ctx.cache.get(
+    { partA: cp.sig, rotA: 0, partB: ctx.movingSig, rotB: 0 },
+    cp.localPoly,
+    ctx.movingPoly,
+  );
+}
+
+function pointToBoundaryDistance(p: Point, poly: Polygon): number {
+  let min = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const ex = p.x - (a.x + t * dx);
+    const ey = p.y - (a.y + t * dy);
+    const d2 = ex * ex + ey * ey;
+    if (d2 < min) min = d2;
+  }
+  return Math.sqrt(min);
+}
+
+/**
+ * Signed clearance of translation `t` against an NFP: negative when `t` is inside the
+ * NFP (the parts overlap), positive when outside (the gap between the parts). This is the
+ * NFP-as-configuration-space-obstacle property: the distance from a free configuration to
+ * the NFP boundary equals the real separation between the two parts. Lets one cheap
+ * point/distance test replace the O(edgesA·edgesB) true-shape collision (P5), and handle
+ * kerf spacing uniformly: collide iff `clearance < kerf − ε`.
+ */
+function nfpClearance(t: Point, nfp: Polygon): number {
+  const d = pointToBoundaryDistance(t, nfp);
+  return pointInPolygon(t, nfp) ? -d : d;
+}
+
 export function bottomLeftFill(
   parts: { part: Part; rotation: number; mirror?: boolean }[],
   sheet: MaterialSheet,
   kerf: number = 0,
   exact: boolean = true,
+  nfpCache: NfpCache | null = null,
 ): PlacedPart[] {
   const placed: PlacedPart[] = [];
   const cache: CachedPlacement[] = [];
   let holes: CachedHole[] = [];
+  const useNfp = exact && nfpCache != null;
 
   for (const { part, rotation, mirror } of parts) {
     const outerPoly = mirror ? reflectPolygon(part.polygons[0]) : part.polygons[0];
@@ -57,6 +131,10 @@ export function bottomLeftFill(
       continue;
     }
 
+    const sig = useNfp ? polySignature(normalized) : '';
+    const nfpCtx: NfpCtx | undefined =
+      useNfp && nfpCache ? { cache: nfpCache, movingSig: sig, movingPoly: normalized } : undefined;
+
     const result = findBestPosition(
       normalized,
       { width: partW, height: partH },
@@ -65,6 +143,7 @@ export function bottomLeftFill(
       sheet,
       kerf,
       exact,
+      nfpCtx,
     );
     if (result) {
       const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation, mirror };
@@ -78,7 +157,13 @@ export function bottomLeftFill(
         width: partW,
         height: partH,
       };
-      const cp: CachedPlacement = { pp, polygon: finalPoly, bb: finalBB };
+      const cp: CachedPlacement = {
+        pp,
+        polygon: finalPoly,
+        bb: finalBB,
+        localPoly: normalized,
+        sig,
+      };
       cache.push(cp);
 
       if (result.hole) {
@@ -241,6 +326,80 @@ function concavityAnchors(cp: CachedPlacement, partBB: { width: number; height: 
 }
 
 /**
+ * NFP candidate anchors (epic #24, P3): the complete set of touching positions where the
+ * moving part beds against the placed part `cp`, including the deep concave seats that
+ * bbox-corner / reflex anchors can't express. Each NFP vertex is an offset (in cp's local
+ * frame) where the parts just touch; we shift it to the sheet by cp's world origin and,
+ * for kerf > 0, push it outward along the NFP boundary so the touching becomes a kerf gap.
+ * Exact collision still validates every candidate and the slide settles it.
+ */
+function nfpCandidateAnchors(nfp: Polygon, offx: number, offy: number, kerf: number): Point[] {
+  const out: Point[] = [];
+  const n = nfp.length;
+  for (let i = 0; i < n; i++) {
+    const v = nfp[i];
+    let px = v.x;
+    let py = v.y;
+    if (kerf > 0) {
+      const pushed = pushOutward(nfp[(i - 1 + n) % n], v, nfp[(i + 1) % n], nfp, kerf);
+      px = pushed.x;
+      py = pushed.y;
+    }
+    out.push({ x: px + offx, y: py + offy });
+  }
+  return out;
+}
+
+/** Push an NFP vertex outward (out of the overlap region) by `dist` along its bisector. */
+function pushOutward(prev: Point, curr: Point, next: Point, nfp: Polygon, dist: number): Point {
+  const e1x = curr.x - prev.x;
+  const e1y = curr.y - prev.y;
+  const e2x = next.x - curr.x;
+  const e2y = next.y - curr.y;
+  const l1 = Math.hypot(e1x, e1y) || 1;
+  const l2 = Math.hypot(e2x, e2y) || 1;
+  let nx = e1y / l1 + e2y / l2;
+  let ny = -(e1x / l1) - e2x / l2;
+  const nl = Math.hypot(nx, ny);
+  if (nl < 1e-9) {
+    nx = e1y / l1;
+    ny = -e1x / l1;
+  } else {
+    nx /= nl;
+    ny /= nl;
+  }
+  let cand = { x: curr.x + nx * dist, y: curr.y + ny * dist };
+  if (pointInPolygon(cand, nfp)) cand = { x: curr.x - nx * dist, y: curr.y - ny * dist };
+  return cand;
+}
+
+/** Bounding box enclosing all currently placed parts (for the compactness metric). */
+function placedUnionBB(cache: CachedPlacement[]): BoundingBox | null {
+  if (cache.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const cp of cache) {
+    if (cp.bb.minX < minX) minX = cp.bb.minX;
+    if (cp.bb.minY < minY) minY = cp.bb.minY;
+    if (cp.bb.maxX > maxX) maxX = cp.bb.maxX;
+    if (cp.bb.maxY > maxY) maxY = cp.bb.maxY;
+  }
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Resulting strip height if a candidate part (top at y+h) joins the placed union. The GA
+ * fitness rewards low strip height (open-area ratio = waste over stripHeight·width), so
+ * the compactness metric (P4) minimizes exactly this — a pocket seat that tucks under the
+ * current ceiling keeps it flat and wins over an exterior spot that raises it.
+ */
+function resultingStrip(u: BoundingBox | null, y: number, h: number): number {
+  return u ? Math.max(u.maxY, y + h) : y + h;
+}
+
+/**
  * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
  * step down while still collision-free, then step left while still collision-free.
  * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
@@ -256,6 +415,7 @@ function slideBottomLeft(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): Point {
   const step = Math.max(1, Math.min(partBB.width, partBB.height) / 4);
   // Bound iterations to what the sheet can physically accommodate (never more than the
@@ -273,17 +433,30 @@ function slideBottomLeft(
     const prevX = cx;
     const prevY = cy;
     let i = 0;
-    while (i++ < MAX_STEPS && !hasCollision(poly, cx, cy - step, cache, sheet, kerf, exact)) {
+    while (
+      i++ < MAX_STEPS &&
+      !hasCollision(poly, cx, cy - step, cache, sheet, kerf, exact, nfpCtx)
+    ) {
       cy -= step;
     }
     i = 0;
-    while (i++ < MAX_STEPS && !hasCollision(poly, cx - step, cy, cache, sheet, kerf, exact)) {
+    while (
+      i++ < MAX_STEPS &&
+      !hasCollision(poly, cx - step, cy, cache, sheet, kerf, exact, nfpCtx)
+    ) {
       cx -= step;
     }
     if (cx === prevX && cy === prevY) break; // converged
   }
 
   return { x: cx, y: cy };
+}
+
+interface ScoredPosition {
+  x: number;
+  y: number;
+  strip: number; // resulting strip height (compactness; P4) — 0 when NFP/compactness is off
+  bl: number; // bottom-left score (tiebreak / sole criterion without NFP)
 }
 
 function tryAdjacentPositions(
@@ -293,55 +466,89 @@ function tryAdjacentPositions(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): PlacementResult | null {
   // Generate candidate positions (cheap): bbox corners + interior-gap anchors (gap-fill)
-  // + concavity anchors (#12 — seat the part's corners at placed parts' reflex/notch
-  // vertices so it can tuck into concavities). Validation is expensive (true-shape kerf
+  // + concavity anchors (#12) + — on the exact NFP path — full NFP touching anchors (#24,
+  // P3) that include the deep pocket seats. Validation is expensive (true-shape / NFP
   // collision), so we cap how many positions we validate and slide rather than checking
-  // every one. Concavity generation is an NFP-flavored candidate set; exact collision
-  // and the slide reject/settle them.
-  const score = (x: number, y: number) => y * sheet.width + x;
-  const positions: { x: number; y: number; score: number }[] = [];
+  // every one.
+  const bl = (x: number, y: number) => y * sheet.width + x;
+  const union = nfpCtx ? placedUnionBB(cache) : null;
+  const positions: { x: number; y: number }[] = [];
   for (const cp of cache) {
-    for (const pos of candidateAnchors(cp, partBB, kerf))
-      positions.push({ ...pos, score: score(pos.x, pos.y) });
+    for (const pos of candidateAnchors(cp, partBB, kerf)) positions.push(pos);
     // Concavity anchors only matter under exact collision (bbox approximation rejects
     // them anyway), so skip them during the fast GA search.
-    if (exact)
-      for (const pos of concavityAnchors(cp, partBB))
-        positions.push({ ...pos, score: score(pos.x, pos.y) });
+    if (exact) for (const pos of concavityAnchors(cp, partBB)) positions.push(pos);
+    if (nfpCtx) {
+      const nfp = nfpFor(nfpCtx, cp);
+      if (nfp)
+        for (const pos of nfpCandidateAnchors(nfp, cp.bb.minX, cp.bb.minY, kerf))
+          positions.push(pos);
+    }
   }
 
-  // Keep only in-sheet positions, prefer the lowest (bottom-left), and validate at most
-  // VALIDATE_BUDGET of them with the expensive collision check — bounds cost regardless
-  // of how many notches the placed parts have.
-  const VALIDATE_BUDGET = 40;
-  const SLIDE_BUDGET = 6;
-  const inSheet = positions.filter(
-    (p) =>
-      p.x >= 0 &&
-      p.y >= 0 &&
-      p.x + partBB.width <= sheet.width &&
-      p.y + partBB.height <= sheet.height,
-  );
-  inSheet.sort((a, b) => a.score - b.score);
+  // Keep only in-sheet positions. Without NFP, prefer the lowest (bottom-left) — exactly
+  // the legacy behavior. With NFP (P4), prefer the most COMPACT (smallest enclosing
+  // bbox), bottom-left as tiebreak, so a part actually chosen seats into a pocket rather
+  // than spreading along the bottom edge.
+  const inSheet: ScoredPosition[] = [];
+  for (const p of positions) {
+    if (
+      p.x < 0 ||
+      p.y < 0 ||
+      p.x + partBB.width > sheet.width ||
+      p.y + partBB.height > sheet.height
+    )
+      continue;
+    inSheet.push({
+      x: p.x,
+      y: p.y,
+      strip: nfpCtx ? resultingStrip(union, p.y, partBB.height) : 0,
+      bl: bl(p.x, p.y),
+    });
+  }
 
-  let best: { x: number; y: number; score: number } | null = null;
+  const better = (a: ScoredPosition, b: ScoredPosition) =>
+    nfpCtx ? a.strip - b.strip || a.bl - b.bl : a.bl - b.bl;
+  inSheet.sort(better);
+
+  // The NFP path validates a larger budget — the exact phase is short, and the compact
+  // seat must not be missed just because lower-y exterior candidates fill the budget.
+  const VALIDATE_BUDGET = nfpCtx ? 80 : 40;
+  const SLIDE_BUDGET = nfpCtx ? 12 : 6;
+
+  let best: ScoredPosition | null = null;
   let validated = 0;
   let slid = 0;
   for (const pos of inSheet) {
     if (validated >= VALIDATE_BUDGET) break;
-    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf, exact)) continue;
+    if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf, exact, nfpCtx)) continue;
     validated++;
+    let cand = pos;
     // Slide only the first few collision-free candidates toward the origin.
     if (slid < SLIDE_BUDGET) {
       slid++;
-      const s = slideBottomLeft(normalizedPoly, pos.x, pos.y, partBB, cache, sheet, kerf, exact);
-      const sc = score(s.x, s.y);
-      if (!best || sc < best.score) best = { x: s.x, y: s.y, score: sc };
-    } else if (!best || pos.score < best.score) {
-      best = pos;
+      const s = slideBottomLeft(
+        normalizedPoly,
+        pos.x,
+        pos.y,
+        partBB,
+        cache,
+        sheet,
+        kerf,
+        exact,
+        nfpCtx,
+      );
+      cand = {
+        x: s.x,
+        y: s.y,
+        strip: nfpCtx ? resultingStrip(union, s.y, partBB.height) : 0,
+        bl: bl(s.x, s.y),
+      };
     }
+    if (!best || better(cand, best) < 0) best = cand;
   }
 
   return best ? { position: { x: best.x, y: best.y }, hole: null } : null;
@@ -354,6 +561,7 @@ function tryGridFallback(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): PlacementResult | null {
   const maxX = sheet.width - partBB.width;
   const maxY = sheet.height - partBB.height;
@@ -361,7 +569,7 @@ function tryGridFallback(
 
   for (let y = 0; y <= maxY; y += step) {
     for (let x = 0; x <= maxX; x += step) {
-      if (!hasCollision(normalizedPoly, x, y, cache, sheet, kerf, exact)) {
+      if (!hasCollision(normalizedPoly, x, y, cache, sheet, kerf, exact, nfpCtx)) {
         return { position: { x, y }, hole: null };
       }
     }
@@ -378,22 +586,31 @@ function findBestPosition(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): PlacementResult | null {
   // Phase 0: Try placing inside holes (always preferred — doesn't increase strip height)
   const holeResult = tryHolePlacement(normalizedPoly, partBB, holes, kerf, exact);
   if (holeResult) return holeResult;
 
   // Phase 1: Try origin first (common fast path for first part)
-  if (!hasCollision(normalizedPoly, 0, 0, cache, sheet, kerf, exact)) {
+  if (!hasCollision(normalizedPoly, 0, 0, cache, sheet, kerf, exact, nfpCtx)) {
     return { position: { x: 0, y: 0 }, hole: null };
   }
 
   // Phase 2: Try positions adjacent to already-placed parts
-  const adjacentResult = tryAdjacentPositions(normalizedPoly, partBB, cache, sheet, kerf, exact);
+  const adjacentResult = tryAdjacentPositions(
+    normalizedPoly,
+    partBB,
+    cache,
+    sheet,
+    kerf,
+    exact,
+    nfpCtx,
+  );
   if (adjacentResult) return adjacentResult;
 
   // Phase 3: Fallback coarse grid scan
-  return tryGridFallback(normalizedPoly, partBB, cache, sheet, kerf, exact);
+  return tryGridFallback(normalizedPoly, partBB, cache, sheet, kerf, exact, nfpCtx);
 }
 
 // --- Collision detection ---
@@ -405,6 +622,7 @@ function checkOverlap(
   placements: CachedPlacement[],
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): boolean {
   for (const cp of placements) {
     if (
@@ -414,6 +632,20 @@ function checkOverlap(
       translatedBB.minY >= cp.bb.maxY + kerf
     ) {
       continue;
+    }
+
+    // NFP-clearance collision (#24, P5): one point-in-polygon + point-to-boundary test
+    // against the cached per-pair NFP replaces the O(edgesA·edgesB) true-shape test, and
+    // expresses kerf spacing as a clearance threshold. Falls back to the true-shape test
+    // when the orbit failed to build for this pair (cache returned null).
+    if (nfpCtx) {
+      const nfp = nfpFor(nfpCtx, cp);
+      if (nfp) {
+        const tx = translatedBB.minX - cp.bb.minX;
+        const ty = translatedBB.minY - cp.bb.minY;
+        if (nfpClearance({ x: tx, y: ty }, nfp) < kerf - NFP_EPS) return true;
+        continue;
+      }
     }
 
     // kerf > 0, exact: true-shape spacing — parts may approach until their actual outlines
@@ -442,6 +674,7 @@ function hasCollision(
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
+  nfpCtx?: NfpCtx,
 ): boolean {
   const translated = translatePolygon(poly, x, y);
   const bb = boundingBox(translated);
@@ -450,5 +683,5 @@ function hasCollision(
     return true;
   }
 
-  return checkOverlap(translated, bb, cache, kerf, exact);
+  return checkOverlap(translated, bb, cache, kerf, exact, nfpCtx);
 }

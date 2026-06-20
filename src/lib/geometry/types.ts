@@ -49,6 +49,10 @@ export interface NestingConfig {
   stallWindow?: number; // generations without meaningful improvement before stopping
   stallEpsilon?: number; // minimum relative improvement that counts as progress
   maxGenerations?: number; // hard safety cap on generations
+  // Opt-in NFP-based placement (epic #24, P3–P5): exact-phase candidate seats, compactness
+  // selection, and NFP-clearance collision. Off by default — denser interlock candidates
+  // exist but the path is ~3–4x slower and not yet a net bench win pending tuning.
+  useNfpPlacement?: boolean;
 }
 
 /** Result for a single sheet within a multi-sheet nesting */
