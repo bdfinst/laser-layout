@@ -57,6 +57,27 @@ function simplifyPartsForNesting(parts: Part[]): Part[] {
 }
 
 /**
+ * Swap a placed part's simplified geometry back to its full-fidelity original.
+ *
+ * Parts are simplified before nesting so NFP/placement math stays fast, but that
+ * simplification (RDP at ~1% of the bounding box) erases small features — relief
+ * cutouts at acute corners, the parallel edges of tabs. Simplification never moves
+ * the coordinate frame, so the placement transform (x/y/rotation/mirror) computed
+ * on the simplified polygon applies identically to the original. Restoring the
+ * original geometry here keeps the rendered/exported result exact.
+ */
+function withOriginalGeometry(placed: PlacedPart[], originals: Map<string, Part>): PlacedPart[] {
+  return placed.map((pp) => {
+    const original = originals.get(pp.part.id);
+    return original ? { ...pp, part: original } : pp;
+  });
+}
+
+function restoreUnplaced(remaining: Part[], originals: Map<string, Part>): Part[] {
+  return remaining.map((p) => originals.get(p.id) ?? p);
+}
+
+/**
  * Global First-Fit-Decreasing ordering (#16): place the largest parts first across the
  * whole job, not just within a sheet. Big parts seed early sheets and small parts fill the
  * gaps they leave, which tends to reduce the total sheet count. Preserves the per-sheet GA
@@ -129,7 +150,9 @@ export function* nestPartsIterative(
   input: NestingInput,
 ): Generator<NestingProgress, NestingResult, void> {
   const { parts, quantities, config } = input;
-  let remaining = sortByDescendingArea(simplifyPartsForNesting(expandParts(parts, quantities)));
+  const expanded = expandParts(parts, quantities);
+  const originals = new Map(expanded.map((p) => [p.id, p]));
+  let remaining = sortByDescendingArea(simplifyPartsForNesting(expanded));
 
   if (remaining.length === 0) {
     return EMPTY_RESULT(config);
@@ -150,10 +173,17 @@ export function* nestPartsIterative(
       if (!iter.done) {
         lastPlacement = iter.value.bestPlacement;
         // Build intermediate result showing current sheet progress
-        const currentSheet = buildSheetResult(lastPlacement, sheetIndex, config);
+        const currentSheet = buildSheetResult(
+          withOriginalGeometry(lastPlacement, originals),
+          sheetIndex,
+          config,
+        );
         const intermediateSheets = [...sheets, currentSheet];
         const placedIds = new Set(lastPlacement.map((p) => p.part.id));
-        const unplaced = remaining.filter((p) => !placedIds.has(p.id));
+        const unplaced = restoreUnplaced(
+          remaining.filter((p) => !placedIds.has(p.id)),
+          originals,
+        );
 
         yield {
           currentSheet: sheetIndex,
@@ -169,7 +199,9 @@ export function* nestPartsIterative(
       break;
     }
 
-    sheets.push(buildSheetResult(finalPlacement, sheetIndex, config));
+    sheets.push(
+      buildSheetResult(withOriginalGeometry(finalPlacement, originals), sheetIndex, config),
+    );
 
     // Remove placed parts from remaining
     const placedIds = new Set(finalPlacement.map((p) => p.part.id));
@@ -177,7 +209,7 @@ export function* nestPartsIterative(
     sheetIndex++;
   }
 
-  return buildNestingResult(sheets, remaining, config);
+  return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
 }
 
 /**
@@ -188,7 +220,9 @@ export function nestParts(
   onProgress?: (generation: number, bestFitness: number) => void,
 ): NestingResult {
   const { parts, quantities, config } = input;
-  let remaining = sortByDescendingArea(simplifyPartsForNesting(expandParts(parts, quantities)));
+  const expanded = expandParts(parts, quantities);
+  const originals = new Map(expanded.map((p) => [p.id, p]));
+  let remaining = sortByDescendingArea(simplifyPartsForNesting(expanded));
 
   if (remaining.length === 0) {
     return EMPTY_RESULT(config);
@@ -203,14 +237,14 @@ export function nestParts(
 
     if (placed.length === 0) break;
 
-    sheets.push(buildSheetResult(placed, sheetIndex, config));
+    sheets.push(buildSheetResult(withOriginalGeometry(placed, originals), sheetIndex, config));
 
     const placedIds = new Set(placed.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
     sheetIndex++;
   }
 
-  return buildNestingResult(sheets, remaining, config);
+  return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
 }
 
 export function computeMinimumSheet(
