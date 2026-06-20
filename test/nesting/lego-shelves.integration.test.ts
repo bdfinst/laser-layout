@@ -47,6 +47,30 @@ describe('Lego shelves end-to-end nesting', () => {
     expect(result.totalPlaced).toBe(12);
   });
 
+  it('preserves full-fidelity geometry in placed parts (no simplification leak)', () => {
+    // Parts are simplified internally to speed up NFP/placement, but the placed
+    // result must carry the original geometry — otherwise small features (relief
+    // cutouts at acute corners, the parallel edges of tabs) are silently lost.
+    const { uniqueParts, quantities } = deduplicateParts(grouped);
+    const result = nestParts({ parts: uniqueParts, quantities, config: CONFIG });
+
+    // The detailed bracket outlines have hundreds of vertices; RDP simplification
+    // at ~1% of the bounding box collapses them to ~20. Every placed part must
+    // match its source vertex count exactly.
+    const sourceVerts = new Map(grouped.map((p) => [p.name, p.polygons[0].length]));
+    const maxSourceVerts = Math.max(...sourceVerts.values());
+    expect(maxSourceVerts).toBeGreaterThan(100); // guards the fixture assumption
+
+    for (const sheet of result.sheets) {
+      for (const pp of sheet.placed) {
+        const expected = sourceVerts.get(pp.part.name);
+        if (expected !== undefined) {
+          expect(pp.part.polygons[0].length).toBe(expected);
+        }
+      }
+    }
+  });
+
   it('keeps every cutout inside its parent after placement', () => {
     const { uniqueParts, quantities } = deduplicateParts(grouped);
     const result = nestParts({ parts: uniqueParts, quantities, config: CONFIG });
