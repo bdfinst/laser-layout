@@ -41,6 +41,8 @@ Everything flows through `Part` (id, name, polygons) and `PlacedPart` (part + x/
 6. **Web Worker** (`nesting/nesting-worker.ts`) runs `nestPartsIterative()` off the main thread, posting progress/done/error messages. The `Map` for quantities requires rehydration from serialized forms (Array or Object).
 7. **Exporters** (`exporters/`) convert `NestingResult` back to SVG or LightBurn format.
 
+**Orbiting NFP (epic #24, not yet wired in).** `nesting/orbiting-nfp.ts` computes the No-Fit Polygon of two _concave_ simple polygons via the orbiting/sliding algorithm (Burke et al.) — O(nA+nB) vertices that already include the deep concave seats the convex Minkowski `computeNFP` and the bbox/concavity anchors can't express. `nesting/nfp-cache.ts` is a translation-invariant per-pair cache keyed by `(partA, rotA, partB, rotB)`. Both are landed behind property/fuzz tests (P1/P2) with **no engine behavior change**; the NFP candidate phase, compactness selection, and in-GA point-in-NFP collision (P3–P5) remain follow-ups gated on the bench.
+
 ### State Management
 
 Single `projectStore` in `stores/project.svelte.ts` using Svelte 5 runes (`$state`). The store holds both `rawParts` (pre-dedup) and `parts` (post-dedup) so dedup can be re-run when tolerance changes. The store uses a closure-based factory pattern (not a class).
