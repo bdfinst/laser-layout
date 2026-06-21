@@ -7,10 +7,12 @@
     projectStore.setQuantity(partId, parseInt(input.value) || 0);
   }
 
-  function fmtSize(mm: number): string {
-    const u = projectStore.state.units;
-    const prec = u === 'in' ? 2 : 1;
-    return toDisplayUnits(mm, u).toFixed(prec);
+  function fmtMm(mm: number): string {
+    return mm.toFixed(1);
+  }
+
+  function fmtIn(mm: number): string {
+    return toDisplayUnits(mm, 'in').toFixed(2);
   }
 
   function totalParts(): number {
@@ -55,9 +57,8 @@
           </div>
           <div class="info">
             <span class="name" title={part.name}>{part.name}</span>
-            <span class="size"
-              >{fmtSize(bb.width)} x {fmtSize(bb.height)} {projectStore.state.units}</span
-            >
+            <span class="size">{fmtMm(bb.width)} × {fmtMm(bb.height)} mm</span>
+            <span class="size alt">{fmtIn(bb.width)} × {fmtIn(bb.height)} in</span>
           </div>
           <div class="qty">
             <input
@@ -136,6 +137,10 @@
     color: #888;
     font-family: monospace;
     font-size: 0.75rem;
+  }
+
+  .size.alt {
+    color: #aaa;
   }
 
   .qty input {

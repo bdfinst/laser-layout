@@ -1,55 +1,6 @@
 <script lang="ts">
-  import {
-    projectStore,
-    toDisplayUnits,
-    fromDisplayUnits,
-    type Units,
-  } from '$lib/stores/project.svelte';
-
-  function units(): Units {
-    return projectStore.state.units;
-  }
-
-  function unitLabel(): string {
-    return units() === 'in' ? 'in' : 'mm';
-  }
-
-  function displayWidth(): string {
-    return toDisplayUnits(projectStore.state.config.sheet.width, units()).toFixed(
-      units() === 'in' ? 2 : 0,
-    );
-  }
-
-  function displayHeight(): string {
-    return toDisplayUnits(projectStore.state.config.sheet.height, units()).toFixed(
-      units() === 'in' ? 2 : 0,
-    );
-  }
-
-  function displayKerf(): string {
-    return toDisplayUnits(projectStore.state.config.kerf, units()).toFixed(
-      units() === 'in' ? 3 : 1,
-    );
-  }
-
-  function onWidthChange(e: Event) {
-    const val = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(val) && val > 0) projectStore.setSheetWidth(fromDisplayUnits(val, units()));
-  }
-
-  function onHeightChange(e: Event) {
-    const val = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(val) && val > 0) projectStore.setSheetHeight(fromDisplayUnits(val, units()));
-  }
-
-  function onKerfChange(e: Event) {
-    const val = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(val) && val >= 0) projectStore.setKerf(fromDisplayUnits(val, units()));
-  }
-
-  function onUnitsChange(e: Event) {
-    projectStore.setUnits((e.target as HTMLSelectElement).value as Units);
-  }
+  import { projectStore } from '$lib/stores/project.svelte';
+  import DimensionInput from './DimensionInput.svelte';
 
   function onToleranceChange(e: Event) {
     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -89,47 +40,33 @@
 
 <div class="material-settings">
   <h3>Material</h3>
+  <p class="hint">Enter dimensions in millimeters or inches — both update together.</p>
   <div class="fields">
-    <div class="field">
-      <label for="units">Units</label>
-      <select id="units" value={projectStore.state.units} onchange={onUnitsChange}>
-        <option value="mm">mm</option>
-        <option value="in">in</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="sheet-width">Width ({unitLabel()})</label>
-      <input
-        id="sheet-width"
-        type="number"
-        min="0.1"
-        step={units() === 'in' ? '0.25' : '1'}
-        value={displayWidth()}
-        onchange={onWidthChange}
-      />
-    </div>
-    <div class="field">
-      <label for="sheet-height">Height ({unitLabel()})</label>
-      <input
-        id="sheet-height"
-        type="number"
-        min="0.1"
-        step={units() === 'in' ? '0.25' : '1'}
-        value={displayHeight()}
-        onchange={onHeightChange}
-      />
-    </div>
-    <div class="field">
-      <label for="kerf">Kerf ({unitLabel()})</label>
-      <input
-        id="kerf"
-        type="number"
-        min="0"
-        step={units() === 'in' ? '0.005' : '0.1'}
-        value={displayKerf()}
-        onchange={onKerfChange}
-      />
-    </div>
+    <DimensionInput
+      id="sheet-width"
+      label="Width"
+      valueMM={projectStore.state.config.sheet.width}
+      minMM={0.1}
+      onChange={(mm) => projectStore.setSheetWidth(mm)}
+    />
+    <DimensionInput
+      id="sheet-height"
+      label="Height"
+      valueMM={projectStore.state.config.sheet.height}
+      minMM={0.1}
+      onChange={(mm) => projectStore.setSheetHeight(mm)}
+    />
+    <DimensionInput
+      id="kerf"
+      label="Kerf"
+      valueMM={projectStore.state.config.kerf}
+      minMM={0}
+      mmStep={0.1}
+      inStep={0.005}
+      mmDecimals={1}
+      inDecimals={3}
+      onChange={(mm) => projectStore.setKerf(mm)}
+    />
   </div>
 
   <h3 class="section-heading">Nesting</h3>
@@ -209,6 +146,12 @@
     margin-top: 1rem;
   }
 
+  .hint {
+    margin: 0 0 0.6rem 0;
+    font-size: 0.75rem;
+    color: #888;
+  }
+
   .fields {
     display: flex;
     flex-direction: column;
@@ -239,14 +182,6 @@
   input[type='range'] {
     flex: 1;
     max-width: 120px;
-  }
-
-  select {
-    padding: 0.3rem 0.4rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    background: white;
   }
 
   .tolerance-hint {
