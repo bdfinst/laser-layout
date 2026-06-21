@@ -4,6 +4,7 @@
   import MaterialSettings from '$lib/components/MaterialSettings.svelte';
   import LayoutPreview from '$lib/components/LayoutPreview.svelte';
   import ExportControls from '$lib/components/ExportControls.svelte';
+  import logoMark from '$lib/assets/favicon.svg';
 </script>
 
 <svelte:head>
@@ -12,8 +13,11 @@
 
 <div class="app">
   <header>
-    <h1>Laser Layout</h1>
-    <p class="subtitle">Nesting optimizer for laser cutting</p>
+    <img class="logo" src={logoMark} alt="" width="40" height="40" />
+    <div class="brand">
+      <h1>Laser Layout</h1>
+      <p class="subtitle">Nesting optimizer for laser cutting</p>
+    </div>
   </header>
 
   <div class="layout">
@@ -45,7 +49,14 @@
   }
 
   header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     margin-bottom: 1.5rem;
+  }
+
+  .logo {
+    flex-shrink: 0;
   }
 
   h1 {

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="208" height="36" viewBox="0 0 208 36" role="img" aria-label="Laser Layout">
+  <title>Laser Layout</title>
+  <!-- Icon: nested parts on a material sheet with a laser cut point -->
+  <g>
+    <rect x="2" y="2" width="32" height="32" rx="5" fill="#4a90d9"/>
+    <g fill="#ffffff">
+      <path d="M7 7h10v10H7z"/>
+      <circle cx="12" cy="12" r="2.3" fill="#4a90d9"/>
+      <circle cx="26" cy="11" r="4"/>
+      <path d="M7 29l5.5-9 5.5 9z"/>
+      <rect x="20" y="19" width="9" height="10" rx="1.6"/>
+    </g>
+    <line x1="29.5" y1="3.5" x2="25.5" y2="23" stroke="#e74c3c" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="25.5" cy="23" r="2.5" fill="#e74c3c"/>
+    <circle cx="25.5" cy="23" r="1" fill="#ffffff"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="44" y="24.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" letter-spacing="-0.3">
+    <tspan fill="#222">Laser</tspan><tspan fill="#4a90d9"> Layout</tspan>
+  </text>
+</svg>
