@@ -168,8 +168,9 @@
       />
     </div>
     <div class="tolerance-hint">
-      Maximize density searches for interlocking placements — denser, but slower. Nesting stops at
-      the time limit (or when you press Stop) and keeps the best layout found.
+      Maximize density searches for interlocking placements — denser, but slower. Turn it off for
+      simple layouts to nest much faster. Either way, nesting stops at the time limit (or when you
+      press Stop) and keeps the best layout found.
     </div>
   </div>
 
