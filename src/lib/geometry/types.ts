@@ -21,6 +21,8 @@ export interface Part {
   name: string;
   polygons: Polygon[]; // outer boundary + any inner cutouts
   sourceIndex: number; // index in the original file
+  /** When true, the nester must not mirror/flip this part (orientation-specific). */
+  lockOrientation?: boolean;
 }
 
 /** A placed part after nesting */

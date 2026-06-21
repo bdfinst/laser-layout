@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-21
 **Branch**: claude/happy-mayer-fjta2s
-**Status**: draft
+**Status**: approved
 
 ## Goal
 
@@ -240,10 +240,10 @@ See per-step ratings. Most steps are `standard`; type/guard steps are `trivial`.
 
 #### Wave 1
 
-- [ ] Slice 1: Lock flag on the model + GA enforcement
-  - [ ] Step 1.1: Add `lockOrientation` to `Part`
-  - [ ] Step 1.2: Clamp mirror off for locked parts in `toOrderedParts`
-  - [ ] Step 1.3: Confirm flag survives engine expansion and round-trip
+- [x] Slice 1: Lock flag on the model + GA enforcement
+  - [x] Step 1.1: Add `lockOrientation` to `Part`
+  - [x] Step 1.2: Clamp mirror off for locked parts in `toOrderedParts`
+  - [x] Step 1.3: Confirm flag survives engine expansion and round-trip
 
 #### Wave 2
 
