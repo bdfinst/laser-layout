@@ -53,6 +53,10 @@ export interface NestingConfig {
   // selection, and NFP-clearance collision. Off by default — denser interlock candidates
   // exist but the path is ~3–4x slower and not yet a net bench win pending tuning.
   useNfpPlacement?: boolean;
+  // Wall-clock budget for a full nest, in milliseconds. The GA runs until it converges or
+  // this budget is reached (checked at generation boundaries), then returns the best layout
+  // so far. Undefined ⇒ the worker's default ceiling.
+  timeBudgetMs?: number;
 }
 
 /** Result for a single sheet within a multi-sheet nesting */

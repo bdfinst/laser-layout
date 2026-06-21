@@ -162,7 +162,13 @@ export function* optimizeIterative(
   // enough for the GA to discover interlocking placements, cheap enough to stay fast. Total
   // generations stay bounded by maxGenerations.
   const eliteCount = Math.max(1, Math.floor(config.populationSize * 0.1));
-  const exactBudget = Math.max(1, Math.min(12, Math.floor(config.maxGenerations / 4)));
+  // Exact (true-shape / NFP) refinement is where density is won. Normally it's a short,
+  // capped tail (the exact phase is costly). In density mode (NFP placement on) the app
+  // trades time for density, so spend a third of the budget refining with NFP rather than
+  // the ~12-generation cap — bounded overall by the worker's wall-clock budget.
+  const exactBudget = config.useNfpPlacement
+    ? Math.max(1, Math.floor(config.maxGenerations / 3))
+    : Math.max(1, Math.min(12, Math.floor(config.maxGenerations / 4)));
   const fastCap = config.maxGenerations - exactBudget;
   const history: number[] = [];
   let exact = false;

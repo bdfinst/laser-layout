@@ -56,6 +56,32 @@
     if (!isNaN(val)) projectStore.setMatchTolerance(val / 100);
   }
 
+  function generations(): number {
+    return projectStore.state.config.generations;
+  }
+
+  function onGenerationsChange(e: Event) {
+    const val = parseInt((e.target as HTMLInputElement).value, 10);
+    if (!isNaN(val) && val > 0) projectStore.setGenerations(val);
+  }
+
+  function timeBudgetSeconds(): number {
+    return Math.round((projectStore.state.config.timeBudgetMs ?? 60000) / 1000);
+  }
+
+  function onTimeBudgetChange(e: Event) {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    if (!isNaN(val) && val > 0) projectStore.setTimeBudgetSeconds(val);
+  }
+
+  function maximizeDensity(): boolean {
+    return projectStore.state.config.useNfpPlacement ?? false;
+  }
+
+  function onDensityChange(e: Event) {
+    projectStore.setUseNfpPlacement((e.target as HTMLInputElement).checked);
+  }
+
   function tolerancePct(): string {
     return (projectStore.state.matchTolerance * 100).toFixed(1);
   }
@@ -103,6 +129,47 @@
         value={displayKerf()}
         onchange={onKerfChange}
       />
+    </div>
+  </div>
+
+  <h3 class="section-heading">Nesting</h3>
+  <div class="fields">
+    <div class="field">
+      <label for="generations">Generations</label>
+      <input
+        id="generations"
+        type="number"
+        min="1"
+        max="1000"
+        step="10"
+        value={generations()}
+        onchange={onGenerationsChange}
+      />
+    </div>
+    <div class="field">
+      <label for="time-budget">Time limit (s)</label>
+      <input
+        id="time-budget"
+        type="number"
+        min="1"
+        max="600"
+        step="5"
+        value={timeBudgetSeconds()}
+        onchange={onTimeBudgetChange}
+      />
+    </div>
+    <div class="field">
+      <label for="max-density">Maximize density</label>
+      <input
+        id="max-density"
+        type="checkbox"
+        checked={maximizeDensity()}
+        onchange={onDensityChange}
+      />
+    </div>
+    <div class="tolerance-hint">
+      Maximize density searches for interlocking placements — denser, but slower. Nesting stops at
+      the time limit (or when you press Stop) and keeps the best layout found.
     </div>
   </div>
 

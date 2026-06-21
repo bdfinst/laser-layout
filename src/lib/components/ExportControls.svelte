@@ -65,6 +65,19 @@
     worker.postMessage({ type: 'start', input: serializedInput });
   }
 
+  function stopNest() {
+    // Halt the worker and keep the best layout found so far (the latest progress result is
+    // already in the store). Bumping the run id discards any in-flight worker message.
+    currentRunId++;
+    teardownWorker();
+    const result = projectStore.state.result;
+    if (result) {
+      projectStore.finishNesting(result);
+    } else {
+      projectStore.setNesting(false);
+    }
+  }
+
   function downloadFile(content: string, filename: string, mimeType: string) {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -120,6 +133,10 @@
       {/if}
     </button>
 
+    {#if projectStore.state.isNesting}
+      <button class="stop-btn" onclick={stopNest}>Stop</button>
+    {/if}
+
     {#if projectStore.state.result && !projectStore.state.isNesting}
       <div class="export-group">
         <select bind:value={exportFormat}>
@@ -166,6 +183,22 @@
   .nest-btn:disabled {
     background: #b0c4de;
     cursor: not-allowed;
+  }
+
+  .stop-btn {
+    padding: 0.6rem 1.25rem;
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .stop-btn:hover {
+    background: #c0392b;
   }
 
   .export-group {

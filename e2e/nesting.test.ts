@@ -3,6 +3,15 @@ import path from 'path';
 
 const FIXTURE = path.resolve('test-fixtures/Hot Air Balloon.lbrn2');
 
+// Density-first nesting can run up to the configurable time budget (default 60s). Cap it
+// low in tests so a nest finishes well within Playwright's per-test timeout; this also
+// exercises the time-limit control. The worker returns the best layout found so far.
+async function setTimeLimit(page: import('@playwright/test').Page, seconds: number) {
+  const input = page.locator('#time-budget');
+  await input.fill(String(seconds));
+  await input.dispatchEvent('change');
+}
+
 test.describe('Page Load', () => {
   test('shows title and upload zone', async ({ page }) => {
     await page.goto('/');
@@ -161,6 +170,7 @@ test.describe('Nesting', () => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);
     await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+    await setTimeLimit(page, 10);
 
     const nestBtn = page.locator('.nest-btn');
     await expect(nestBtn).toBeEnabled();
@@ -189,6 +199,7 @@ test.describe('Nesting', () => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);
     await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+    await setTimeLimit(page, 10);
 
     // First nest
     await page.locator('.nest-btn').click();
@@ -207,6 +218,34 @@ test.describe('Nesting', () => {
     const secondStats = await page.locator('.overall-stats').textContent();
     expect(secondStats).not.toBe(firstStats);
   });
+
+  test('exposes generations, time limit, and density controls', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#generations')).toBeVisible();
+    await expect(page.locator('#time-budget')).toBeVisible();
+    await expect(page.locator('#max-density')).toBeVisible();
+    // Density-first is the default.
+    await expect(page.locator('#max-density')).toBeChecked();
+  });
+
+  test('stop halts nesting and keeps the best layout so far', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('#file-input').setInputFiles(FIXTURE);
+    await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+
+    await page.locator('.nest-btn').click();
+    // Wait until the first progress arrives (a layout exists), then stop mid-run so there
+    // is a best-so-far layout to keep.
+    await expect(page.locator('.overall-stats')).toBeVisible({ timeout: 10000 });
+    const stopBtn = page.locator('.stop-btn');
+    await expect(stopBtn).toBeVisible();
+    await stopBtn.click();
+
+    // Returns to idle and keeps the best layout found so far.
+    await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 5000 });
+    await expect(stopBtn).toBeHidden();
+    await expect(page.locator('.overall-stats')).toBeVisible();
+  });
 });
 
 test.describe('Export', () => {
@@ -214,6 +253,7 @@ test.describe('Export', () => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);
     await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+    await setTimeLimit(page, 10);
 
     await page.locator('.nest-btn').click();
     await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
@@ -227,6 +267,7 @@ test.describe('Export', () => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);
     await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+    await setTimeLimit(page, 10);
 
     await page.locator('.nest-btn').click();
     await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });

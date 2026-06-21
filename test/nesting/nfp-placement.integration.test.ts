@@ -131,12 +131,15 @@ describe('NFP placement path (epic #24, P3–P5, opt-in)', () => {
       ),
     );
     const { uniqueParts, quantities } = deduplicateParts(grouped);
+    // A light budget — this checks feasibility/validity of the NFP path, not search
+    // quality, so cap generations low to keep the (NFP-heavy) nest well under the timeout.
     const base: NestingConfig = {
       sheet: { width: 500, height: 500 },
       kerf: 1,
       rotationSteps: 72,
-      populationSize: 30,
-      generations: 40,
+      populationSize: 20,
+      generations: 8,
+      maxGenerations: 10,
       useNfpPlacement: true,
     };
     const on = nestParts({ parts: uniqueParts, quantities, config: base });
