@@ -83,3 +83,80 @@ describe('setLockOrientation', () => {
     expect(projectStore.state.parts.every((p) => p.lockOrientation !== true)).toBe(true);
   });
 });
+
+describe('setPriority', () => {
+  it('defaults parts to required and clears any prior result when changed', () => {
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+    const id = projectStore.state.parts[0].id;
+    expect(projectStore.state.parts[0].priority).toBe('required');
+    projectStore.updateResult(
+      { sheets: [], unplaced: [], sheetWidth: 1, sheetHeight: 1, totalPlaced: 0 },
+      1,
+      0,
+    );
+
+    projectStore.setPriority(id, 'optional');
+
+    expect(projectStore.state.parts.find((p) => p.id === id)?.priority).toBe('optional');
+    expect(projectStore.state.partPriority.get(id)).toBe('optional');
+    expect(projectStore.state.result).toBeNull();
+  });
+
+  it('preserves priority across a re-dedup triggered by a tolerance change', () => {
+    projectStore.setParts([rect('a', 10, 10), rect('b', 20, 5)], 'f.svg');
+    const id = projectStore.state.parts[0].id;
+    projectStore.setPriority(id, 'optional');
+
+    projectStore.setMatchTolerance(0.005);
+
+    expect(projectStore.state.parts.find((p) => p.id === id)?.priority).toBe('optional');
+  });
+
+  it('reset clears all priority state', () => {
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+    projectStore.setPriority(projectStore.state.parts[0].id, 'optional');
+
+    projectStore.reset();
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+
+    expect(projectStore.state.parts.every((p) => p.priority === 'required')).toBe(true);
+  });
+});
+
+describe('setGrainConstraint', () => {
+  it('sets the matching part flag and clears any prior result', () => {
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+    const id = projectStore.state.parts[0].id;
+    projectStore.updateResult(
+      { sheets: [], unplaced: [], sheetWidth: 1, sheetHeight: 1, totalPlaced: 0 },
+      1,
+      0,
+    );
+
+    projectStore.setGrainConstraint(id, true);
+
+    expect(projectStore.state.parts.find((p) => p.id === id)?.grainConstraint).toBe(true);
+    expect(projectStore.state.grainConstrained.get(id)).toBe(true);
+    expect(projectStore.state.result).toBeNull();
+  });
+
+  it('preserves the grain lock across a re-dedup triggered by a tolerance change', () => {
+    projectStore.setParts([rect('a', 10, 10), rect('b', 20, 5)], 'f.svg');
+    const id = projectStore.state.parts[0].id;
+    projectStore.setGrainConstraint(id, true);
+
+    projectStore.setMatchTolerance(0.005);
+
+    expect(projectStore.state.parts.find((p) => p.id === id)?.grainConstraint).toBe(true);
+  });
+
+  it('reset clears all grain state', () => {
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+    projectStore.setGrainConstraint(projectStore.state.parts[0].id, true);
+
+    projectStore.reset();
+    projectStore.setParts([rect('a', 10, 10)], 'f.svg');
+
+    expect(projectStore.state.parts.every((p) => p.grainConstraint !== true)).toBe(true);
+  });
+});

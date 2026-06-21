@@ -13,6 +13,16 @@
     projectStore.setLockOrientation(partId, input.checked);
   }
 
+  function onPriorityChange(partId: string, e: Event) {
+    const select = e.target as HTMLSelectElement;
+    projectStore.setPriority(partId, select.value === 'optional' ? 'optional' : 'required');
+  }
+
+  function onGrainChange(partId: string, e: Event) {
+    const input = e.target as HTMLInputElement;
+    projectStore.setGrainConstraint(partId, input.checked);
+  }
+
   function fmtMm(mm: number): string {
     return mm.toFixed(1);
   }
@@ -76,6 +86,36 @@
             />
           </div>
           <div
+            class="priority"
+            use:tooltip={'Required parts always get a sheet. Optional parts fill in where they fit and are dropped instead of opening a new sheet.'}
+          >
+            <label class="sr-only" for={`priority-${part.id}`}>Priority for {part.name}</label>
+            <select
+              id={`priority-${part.id}`}
+              value={part.priority ?? 'required'}
+              onchange={(e) => onPriorityChange(part.id, e)}
+            >
+              <option value="required">Required</option>
+              <option value="optional">Optional</option>
+            </select>
+          </div>
+          <div
+            class="grain"
+            use:tooltip={'Directional material: only allow 0°/180° rotation so the grain stays aligned.'}
+          >
+            <input
+              type="checkbox"
+              id={`grain-${part.id}`}
+              aria-describedby="grain-hint"
+              checked={part.grainConstraint ?? false}
+              onchange={(e) => onGrainChange(part.id, e)}
+            />
+            <label for={`grain-${part.id}`}>
+              Grain
+              <span class="sr-only">lock 0°/180° for {part.name}</span>
+            </label>
+          </div>
+          <div
             class="lock-orientation"
             use:tooltip={'Never mirror this part during nesting; rotation and placement are still optimized.'}
           >
@@ -96,6 +136,10 @@
     </div>
     <p id="lock-orientation-hint" class="hint">
       Locked parts are never mirrored during nesting; rotation and placement are still optimized.
+    </p>
+    <p id="grain-hint" class="hint">
+      Optional parts fill in where they fit and are dropped instead of opening a new sheet. Grain
+      locks a part to 0°/180° rotation for directional material.
     </p>
   </div>
 {/if}
@@ -120,6 +164,10 @@
   .part-row {
     display: flex;
     align-items: center;
+    /* The sidebar is narrow (320px) and each row now carries several controls
+       (qty, priority, grain, lock). Wrap so the controls flow onto a second line
+       instead of squeezing .info to zero width and clipping the size text. */
+    flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.35rem 0.5rem;
     border: 1px solid #eee;
@@ -143,8 +191,10 @@
   }
 
   .info {
-    flex: 1;
-    min-width: 0;
+    /* Keep a width floor so the dual mm/in size text always has room to render;
+       without it the row's fixed controls can collapse .info to zero width. */
+    flex: 1 1 8rem;
+    min-width: 8rem;
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
@@ -177,11 +227,31 @@
     font-size: 0.85rem;
   }
 
+  .priority {
+    flex-shrink: 0;
+  }
+
+  .priority select {
+    padding: 0.2rem 0.3rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    background: #fff;
+  }
+
+  .grain,
   .lock-orientation {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 0.3rem;
+  }
+
+  .grain label {
+    font-size: 0.75rem;
+    color: #555;
+    white-space: nowrap;
+    cursor: pointer;
   }
 
   .lock-orientation label {

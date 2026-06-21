@@ -180,6 +180,38 @@ test.describe('Part List', () => {
     // The locked-part nest still produces placements.
     await expect(page.locator('.overall-stats')).toContainText(/Total placed:\s*[1-9]/);
   });
+
+  test('priority and grain controls round-trip and a nest still completes', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('#file-input').setInputFiles(FIXTURE);
+    await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 15000 });
+
+    // Quantity priority defaults to "required" and toggles to "optional".
+    const priority = page.locator('.priority select').first();
+    await expect(priority).toHaveValue('required');
+    await priority.selectOption('optional');
+    await expect(priority).toHaveValue('optional');
+    await priority.selectOption('required');
+    await expect(priority).toHaveValue('required');
+
+    // Grain lock defaults off, is labelled, and round-trips.
+    const grain = page.locator('.grain input').first();
+    await expect(grain).not.toBeChecked();
+    await expect(grain).toHaveAttribute('id', /^grain-/);
+    await expect(grain).toHaveAccessibleName(/Grain/);
+    await grain.check();
+    await expect(grain).toBeChecked();
+    await grain.uncheck();
+    await expect(grain).not.toBeChecked();
+
+    // Mark the part optional + grain-locked, then confirm a nest still completes.
+    await priority.selectOption('optional');
+    await grain.check();
+    await setTimeLimit(page, 10);
+    await page.locator('.nest-btn').click();
+    await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
+    await expect(page.locator('.overall-stats')).toBeVisible();
+  });
 });
 
 test.describe('Nesting', () => {
