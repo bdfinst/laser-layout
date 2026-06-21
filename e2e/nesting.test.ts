@@ -12,6 +12,16 @@ async function setTimeLimit(page: import('@playwright/test').Page, seconds: numb
   await input.dispatchEvent('change');
 }
 
+async function fillAndCommit(
+  page: import('@playwright/test').Page,
+  selector: string,
+  value: string,
+) {
+  const input = page.locator(selector);
+  await input.fill(value);
+  await input.dispatchEvent('change');
+}
+
 test.describe('Page Load', () => {
   test('shows title and upload zone', async ({ page }) => {
     await page.goto('/');
@@ -49,50 +59,37 @@ test.describe('File Upload', () => {
 });
 
 test.describe('Material Settings', () => {
-  test('shows width, height, kerf, units, and tolerance controls', async ({ page }) => {
+  test('shows width, height, kerf (mm + in) and tolerance controls', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('#sheet-width')).toBeVisible();
-    await expect(page.locator('#sheet-height')).toBeVisible();
-    await expect(page.locator('#kerf')).toBeVisible();
-    await expect(page.locator('#units')).toBeVisible();
+    // Each dimension exposes a metric and an imperial input simultaneously.
+    await expect(page.locator('#sheet-width-mm')).toBeVisible();
+    await expect(page.locator('#sheet-width-in')).toBeVisible();
+    await expect(page.locator('#sheet-height-mm')).toBeVisible();
+    await expect(page.locator('#sheet-height-in')).toBeVisible();
+    await expect(page.locator('#kerf-mm')).toBeVisible();
+    await expect(page.locator('#kerf-in')).toBeVisible();
     await expect(page.locator('#tolerance')).toBeVisible();
   });
 
-  test('switching to inches updates labels', async ({ page }) => {
+  test('mm and in inputs show the same dimension', async ({ page }) => {
     await page.goto('/');
-    await page.locator('#units').selectOption('in');
-    // Labels should contain "in"
-    const widthLabel = page.locator('label[for="sheet-width"]');
-    await expect(widthLabel).toContainText('in');
+    // Default sheet width is 508mm = 20in.
+    expect(parseFloat(await page.locator('#sheet-width-mm').inputValue())).toBe(508);
+    expect(parseFloat(await page.locator('#sheet-width-in').inputValue())).toBeCloseTo(20, 1);
   });
 
-  test('changing units converts values', async ({ page }) => {
+  test('editing the mm input updates the in input', async ({ page }) => {
     await page.goto('/');
-    // Default sheet is 508 x 762 mm (20 x 30 in); width is 508mm.
-    const widthInput = page.locator('#sheet-width');
-    const mmVal = parseFloat(await widthInput.inputValue());
-    expect(mmVal).toBe(508);
-
-    // Switch to inches
-    await page.locator('#units').selectOption('in');
-    const inVal = parseFloat(await widthInput.inputValue());
-    // 508mm = 20in
-    expect(inVal).toBeCloseTo(20, 1);
+    await fillAndCommit(page, '#sheet-width-mm', '254');
+    // 254mm = 10in
+    expect(parseFloat(await page.locator('#sheet-width-in').inputValue())).toBeCloseTo(10, 1);
   });
 
-  test('entering inch value stores correct mm internally', async ({ page }) => {
+  test('editing the in input updates the mm input', async ({ page }) => {
     await page.goto('/');
-    await page.locator('#units').selectOption('in');
-
-    const widthInput = page.locator('#sheet-width');
-    await widthInput.fill('12');
-    await widthInput.dispatchEvent('change');
-
-    // Switch back to mm to verify
-    await page.locator('#units').selectOption('mm');
-    const mmVal = parseFloat(await widthInput.inputValue());
+    await fillAndCommit(page, '#sheet-width-in', '12');
     // 12in = 304.8mm
-    expect(mmVal).toBeCloseTo(305, 0);
+    expect(parseFloat(await page.locator('#sheet-width-mm').inputValue())).toBeCloseTo(305, 0);
   });
 
   test('tolerance slider adjusts shape matching', async ({ page }) => {
@@ -144,19 +141,15 @@ test.describe('Part List', () => {
     expect(newTotal).toBeLessThan(initialTotal);
   });
 
-  test('part sizes shown in selected units', async ({ page }) => {
+  test('part sizes shown in both mm and in', async ({ page }) => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);
     await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
 
-    // Default mm
-    const sizeText = await page.locator('.size').first().textContent();
-    expect(sizeText).toContain('mm');
-
-    // Switch to inches
-    await page.locator('#units').selectOption('in');
-    const sizeTextIn = await page.locator('.size').first().textContent();
-    expect(sizeTextIn).toContain('in');
+    // Each part row shows both metric and imperial dimensions at once.
+    const row = page.locator('.part-row').first();
+    await expect(row.locator('.size', { hasText: 'mm' })).toBeVisible();
+    await expect(row.locator('.size', { hasText: 'in' })).toBeVisible();
   });
 });
 

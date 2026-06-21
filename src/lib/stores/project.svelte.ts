@@ -17,7 +17,6 @@ export interface ProjectState {
   generation: number;
   currentSheet: number;
   fileName: string;
-  units: Units;
   matchTolerance: number; // fraction: 0.01 = 1%, 0.001 = 0.1%
 }
 
@@ -42,6 +41,14 @@ export function fromDisplayUnits(val: number, units: Units): number {
   return units === 'in' ? val * MM_PER_INCH : val;
 }
 
+/**
+ * Format a millimeter value showing both metric and imperial at once,
+ * e.g. `508 mm / 20.00 in`. Used for read-only dimension displays.
+ */
+export function formatDual(mm: number, mmDecimals = 1, inDecimals = 2): string {
+  return `${mm.toFixed(mmDecimals)} mm / ${toDisplayUnits(mm, 'in').toFixed(inDecimals)} in`;
+}
+
 function createProjectStore() {
   let state = $state<ProjectState>({
     parts: [],
@@ -53,7 +60,6 @@ function createProjectStore() {
     generation: 0,
     currentSheet: 0,
     fileName: '',
-    units: 'mm',
     matchTolerance: 0.01,
   });
 
@@ -117,10 +123,6 @@ function createProjectStore() {
       state.result = null;
     },
 
-    setUnits(units: Units) {
-      state.units = units;
-    },
-
     setMatchTolerance(pct: number) {
       state.matchTolerance = Math.max(0.001, Math.min(0.01, pct));
       runDedup();
@@ -158,7 +160,6 @@ function createProjectStore() {
         generation: 0,
         currentSheet: 0,
         fileName: '',
-        units: 'mm',
         matchTolerance: 0.01,
       };
     },

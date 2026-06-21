@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { projectStore, toDisplayUnits } from '$lib/stores/project.svelte';
+  import { projectStore, formatDual } from '$lib/stores/project.svelte';
   import { getPlacedPolygons, toSVGPathD } from '$lib/geometry/polygon';
 
   const COLORS = [
@@ -18,8 +18,7 @@
   }
 
   function fmtDim(mm: number): string {
-    const u = projectStore.state.units;
-    return toDisplayUnits(mm, u).toFixed(u === 'in' ? 2 : 1) + ' ' + u;
+    return formatDual(mm);
   }
 </script>
 
