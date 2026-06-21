@@ -164,6 +164,10 @@
   .part-row {
     display: flex;
     align-items: center;
+    /* The sidebar is narrow (320px) and each row now carries several controls
+       (qty, priority, grain, lock). Wrap so the controls flow onto a second line
+       instead of squeezing .info to zero width and clipping the size text. */
+    flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.35rem 0.5rem;
     border: 1px solid #eee;
@@ -187,8 +191,10 @@
   }
 
   .info {
-    flex: 1;
-    min-width: 0;
+    /* Keep a width floor so the dual mm/in size text always has room to render;
+       without it the row's fixed controls can collapse .info to zero width. */
+    flex: 1 1 8rem;
+    min-width: 8rem;
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
