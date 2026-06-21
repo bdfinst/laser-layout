@@ -1,17 +1,12 @@
 import {
-  nestPartsIterative,
+  nestPartsMultiStartIterative,
+  resolveTimeBudget,
   type NestingInput,
   type NestingResult,
   type NestingProgress,
 } from './engine';
 
 export type WorkerMessage = { type: 'start'; input: NestingInput };
-
-// Default wall-clock budget for a full nest when the config doesn't specify one. The app
-// optimizes for density over speed, so it runs the GA until it converges or the budget is
-// reached (checked at generation boundaries, so one in-flight generation may run past it),
-// then returns the best layout found so far. Configurable via `NestingConfig.timeBudgetMs`.
-const DEFAULT_NEST_BUDGET_MS = 60_000;
 
 export type WorkerResponse =
   | { type: 'progress'; currentSheet: number; generation: number; result: NestingResult }
@@ -38,18 +33,16 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       quantities: new Map(entries),
     };
 
-    const gen = nestPartsIterative(input);
-    const budget =
-      input.config.timeBudgetMs && input.config.timeBudgetMs > 0
-        ? input.config.timeBudgetMs
-        : DEFAULT_NEST_BUDGET_MS;
-    const deadline = Date.now() + budget;
+    // Multi-start nesting (the engine owns all restart/best-keeping/early-stop policy). The
+    // worker just drives the generator, reporting best-so-far progress and enforcing the
+    // wall-clock budget between generations — so a single long start can still be cut off
+    // and the best layout so far returned, rather than nothing.
+    const deadline = Date.now() + resolveTimeBudget(input.config);
+    const gen = nestPartsMultiStartIterative(input);
     let lastResult: NestingResult | null = null;
 
     function step() {
       try {
-        // Stop before starting another generation once the budget is spent; return the
-        // best layout found so far rather than nothing.
         if (Date.now() >= deadline && lastResult) {
           self.postMessage({ type: 'done', result: lastResult } satisfies WorkerResponse);
           return;
