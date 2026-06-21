@@ -103,6 +103,8 @@ export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
     stallWindow: config.stallWindow ?? 15,
     stallEpsilon: config.stallEpsilon ?? 0.005,
     useNfpPlacement: config.useNfpPlacement ?? false,
+    gravityWeight: config.gravityWeight,
+    remnantWeight: config.remnantWeight,
   };
 }
 

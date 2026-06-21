@@ -1,7 +1,7 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 import { boundingBox } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
-import { openAreaStats } from './stats';
+import { openAreaStats, gravityMetric, remnantStats } from './stats';
 import { createNfpCache, type NfpCache } from './nfp-cache';
 
 /**
@@ -26,14 +26,40 @@ export function heuristicOrders(parts: Part[]): number[][] {
 export const PENALTY_PER_UNPLACED = 1000;
 export const STRIP_TIEBREAK = 1e-3;
 
+// Remnant-aware terms (#41). Both are small relative to openAreaRatio (range [0,1]) so
+// the dominant density objective and feasibility are never overridden — they only break
+// ties among comparably-dense layouts, nudging toward a clustered pack and one large
+// reusable offcut. Tunable via OptimizerConfig.{gravityWeight,remnantWeight}.
+export const GRAVITY_WEIGHT = 0.05;
+export const REMNANT_WEIGHT = 0.05;
+
+export interface FitnessStats {
+  openAreaRatio: number;
+  stripHeight: number;
+  /** Compactness pull in [0,1] (lower is tighter). Omit to disable the gravity term. */
+  gravity?: number;
+  /** Largest reusable-offcut ratio in [0,1] (higher is better). Omit to disable the remnant term. */
+  remnantRatio?: number;
+}
+
 export function fitnessFromStats(
-  stats: { openAreaRatio: number; stripHeight: number },
+  stats: FitnessStats,
   unplacedCount: number,
   sheetHeight: number,
+  weights: { gravity?: number; remnant?: number } = {},
 ): number {
+  const gravityWeight = weights.gravity ?? GRAVITY_WEIGHT;
+  const remnantWeight = weights.remnant ?? REMNANT_WEIGHT;
+  // Terms are opt-in by presence: when a metric is omitted its contribution is exactly 0,
+  // so legacy callers (and the existing baselines) are byte-for-byte unchanged.
+  const gravityTerm = stats.gravity === undefined ? 0 : gravityWeight * stats.gravity;
+  const remnantTerm =
+    stats.remnantRatio === undefined ? 0 : remnantWeight * (1 - stats.remnantRatio);
   return (
     unplacedCount * PENALTY_PER_UNPLACED +
     stats.openAreaRatio +
+    gravityTerm +
+    remnantTerm +
     STRIP_TIEBREAK * (sheetHeight > 0 ? stats.stripHeight / sheetHeight : 0)
   );
 }
@@ -46,6 +72,10 @@ export interface OptimizerConfig {
   mutationRate: number;
   rotationSteps: number; // e.g. 360 means 1° increments
   useNfpPlacement?: boolean; // opt-in NFP placement path (epic #24, P3–P5); default off
+  // Remnant-aware fitness weights (#41). Small by design; default to GRAVITY_WEIGHT /
+  // REMNANT_WEIGHT. Set to 0 to disable a term without touching the rest of the fitness.
+  gravityWeight?: number;
+  remnantWeight?: number;
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
@@ -123,11 +153,15 @@ export function* optimizeIterative(
   // placement path runs unchanged. Discarded with this generator when the sheet is done.
   const nfpCache: NfpCache | null = config.useNfpPlacement ? createNfpCache() : null;
 
+  // Remnant-aware fitness weights (#41), resolved once and threaded to every evaluation.
+  const gw = config.gravityWeight;
+  const rw = config.remnantWeight;
+
   // Initialize population
   let population: Individual[] = [];
   for (let i = 0; i < config.populationSize; i++) {
     const individual = createRandomIndividual(n, angleStep, config.rotationSteps);
-    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache);
+    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache, gw, rw);
     population.push(individual);
   }
 
@@ -139,7 +173,7 @@ export function* optimizeIterative(
     fitness: 0,
     placement: [],
   };
-  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache);
+  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache, gw, rw);
   population[0] = noRotation;
 
   // Seed a few individuals with biggest-first heuristic orderings (#13).
@@ -152,7 +186,7 @@ export function* optimizeIterative(
       fitness: 0,
       placement: [],
     };
-    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache);
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache, gw, rw);
     population[s + 1] = seeded;
   }
 
@@ -190,7 +224,7 @@ export function* optimizeIterative(
       if (Math.random() < config.mutationRate) {
         child = mutate(child, angleStep, config.rotationSteps);
       }
-      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache);
+      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache, gw, rw);
       nextGen.push(child);
     }
 
@@ -208,7 +242,7 @@ export function* optimizeIterative(
         // Switch to exact refinement: re-score the whole population with true-shape
         // collision so fitness is comparable, then reset the stall window.
         for (const ind of population)
-          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache);
+          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw);
         population.sort((a, b) => a.fitness - b.fitness);
         exact = true;
         history.length = 0;
@@ -275,13 +309,23 @@ function evaluate(
   kerf: number,
   exact: boolean,
   nfpCache: NfpCache | null = null,
+  gravityWeight?: number,
+  remnantWeight?: number,
 ): number {
   const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact, nfpCache);
   individual.placement = placed; // cache for progress reporting
   const stats = openAreaStats(placed, sheet);
   const unplacedCount = parts.length - placed.length;
 
-  return fitnessFromStats(stats, unplacedCount, sheet.height);
+  // Remnant-aware terms (#41): nudge toward a clustered pack with one large reusable
+  // offcut. Both default-weighted small so density/feasibility stay dominant.
+  const gravity = gravityMetric(placed, sheet);
+  const remnantRatio = remnantStats(placed, sheet).largestRectRatio;
+
+  return fitnessFromStats({ ...stats, gravity, remnantRatio }, unplacedCount, sheet.height, {
+    gravity: gravityWeight,
+    remnant: remnantWeight,
+  });
 }
 
 function tournamentSelect(population: Individual[], size: number = 3): Individual {
