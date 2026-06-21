@@ -45,6 +45,7 @@
     <DimensionInput
       id="sheet-width"
       label="Width"
+      tooltip="Width of the material sheet to nest parts onto."
       valueMM={projectStore.state.config.sheet.width}
       minMM={0.1}
       onChange={(mm) => projectStore.setSheetWidth(mm)}
@@ -52,6 +53,7 @@
     <DimensionInput
       id="sheet-height"
       label="Height"
+      tooltip="Height of the material sheet to nest parts onto."
       valueMM={projectStore.state.config.sheet.height}
       minMM={0.1}
       onChange={(mm) => projectStore.setSheetHeight(mm)}
@@ -59,6 +61,7 @@
     <DimensionInput
       id="kerf"
       label="Kerf"
+      tooltip="Cut-width compensation — spacing added around every part for the laser beam's material removal, so cut edges don't overlap."
       valueMM={projectStore.state.config.kerf}
       minMM={0}
       mmStep={0.1}
@@ -71,7 +74,10 @@
 
   <h3 class="section-heading">Nesting</h3>
   <div class="fields">
-    <div class="field">
+    <div
+      class="field"
+      title="How many genetic-algorithm iterations to run per sheet. More generations can find tighter layouts but take longer."
+    >
       <label for="generations">Generations</label>
       <input
         id="generations"
@@ -83,7 +89,10 @@
         onchange={onGenerationsChange}
       />
     </div>
-    <div class="field">
+    <div
+      class="field"
+      title="Maximum time to spend nesting before returning the best layout found so far."
+    >
       <label for="time-budget">Time limit (s)</label>
       <input
         id="time-budget"
@@ -95,7 +104,10 @@
         onchange={onTimeBudgetChange}
       />
     </div>
-    <div class="field">
+    <div
+      class="field"
+      title="Search for interlocking placements for denser packing (slower). Turn off for faster nesting of simple layouts."
+    >
       <label for="max-density">Maximize density</label>
       <input
         id="max-density"
@@ -113,7 +125,10 @@
 
   <h3 class="section-heading">Shape Matching</h3>
   <div class="fields">
-    <div class="field">
+    <div
+      class="field"
+      title="How closely two parts must match to be treated as identical and grouped into one entry with a quantity count. Higher groups more aggressively; lower keeps near-matches separate."
+    >
       <label for="tolerance">Tolerance ({tolerancePct()}%)</label>
       <input
         id="tolerance"

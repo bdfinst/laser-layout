@@ -124,7 +124,12 @@
 
 <div class="controls">
   <div class="buttons">
-    <button class="nest-btn" onclick={doNest} disabled={!canNest()}>
+    <button
+      class="nest-btn"
+      title="Run the nesting optimizer to pack the parts onto material sheets."
+      onclick={doNest}
+      disabled={!canNest()}
+    >
       {#if projectStore.state.isNesting}
         Nesting... Sheet {projectStore.state.currentSheet + 1}, Gen {projectStore.state.generation +
           1}
@@ -134,16 +139,26 @@
     </button>
 
     {#if projectStore.state.isNesting}
-      <button class="stop-btn" onclick={stopNest}>Stop</button>
+      <button
+        class="stop-btn"
+        title="Stop nesting now and keep the best layout found so far."
+        onclick={stopNest}>Stop</button
+      >
     {/if}
 
     {#if projectStore.state.result && !projectStore.state.isNesting}
       <div class="export-group">
-        <select bind:value={exportFormat}>
+        <select bind:value={exportFormat} title="Choose the export file format.">
           <option value="svg">SVG</option>
           <option value="lightburn">LightBurn (.lbrn2)</option>
         </select>
-        <button class="export-btn" onclick={doExport}> Export </button>
+        <button
+          class="export-btn"
+          title="Download the nested layout — one file per sheet."
+          onclick={doExport}
+        >
+          Export
+        </button>
       </div>
     {/if}
   </div>

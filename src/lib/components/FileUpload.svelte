@@ -62,6 +62,7 @@
 <div
   class="upload-zone"
   class:drag-over={dragOver}
+  title="Upload an SVG, .lbrn, or .lbrn2 file (max 10 MB) — drop it here or click to browse."
   ondrop={onDrop}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
