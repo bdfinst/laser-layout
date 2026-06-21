@@ -61,7 +61,7 @@ lower bound) raises the placer's ~40%/run one-sheet rate to **5/5** at ~60–70s
 
 ## Build Progress
 
-- [ ] Slice A: placer improvement
-- [ ] Slice B: multi-start engine helper
-- [ ] Slice C: worker multi-start
-- [ ] Slice D: bench row
+- [x] Slice A: placer improvement
+- [x] Slice B: multi-start engine helper
+- [x] Slice C: worker multi-start
+- [x] Slice D: bench row

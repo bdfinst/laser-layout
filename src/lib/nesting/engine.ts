@@ -287,48 +287,88 @@ export function sheetLowerBound(
   return Math.max(1, Math.ceil(total / sheetArea));
 }
 
+/** Default wall-clock budget for a full nest when the config doesn't specify one. */
+export const DEFAULT_NEST_BUDGET_MS = 60_000;
+
+/** Resolve the wall-clock budget for a nest from config/options, falling back to the default. */
+export function resolveTimeBudget(config: NestingConfig, override?: number): number {
+  if (override != null) return override;
+  return config.timeBudgetMs && config.timeBudgetMs > 0
+    ? config.timeBudgetMs
+    : DEFAULT_NEST_BUDGET_MS;
+}
+
+/** A result is optimal when everything is placed on the fewest sheets physically possible. */
+export function isOptimalResult(result: NestingResult, floor: number): boolean {
+  return result.unplaced.length === 0 && result.sheets.length <= floor;
+}
+
 export interface MultiStartOptions {
   /** Wall-clock budget across all starts (ms). Defaults to the config's timeBudgetMs or 60s. */
   timeBudgetMs?: number;
-  /** Hard cap on the number of starts (mainly for deterministic tests). */
+  /** Hard cap on the number of starts. Defaults to a safety bound so degenerate instant nests can't spin. */
   maxStarts?: number;
   /** Injectable clock for tests. */
   now?: () => number;
 }
 
+// Safety bound on starts so a job that completes near-instantly (and can't reach the floor)
+// can't spin the loop; real jobs are bounded first by the wall-clock budget.
+const MAX_STARTS_DEFAULT = 1000;
+
 /**
- * Multi-start nesting: repeat the whole nest with the RNG advancing between starts and keep
- * the best result. Greedy placement caps well below the optimum on dense jobs (e.g.
- * lego-shelves: every constructive heuristic places only 9–10/12), and a single GA run finds
- * the rare one-sheet arrangement only occasionally — so running several independent searches
- * and keeping the best turns an ~40%/run success rate into a reliable one. Bounded by the
- * time budget and short-circuited once the area lower bound is reached (can't do better).
+ * Multi-start nesting as a generator: repeat the whole nest with the RNG advancing between
+ * starts and keep the best result, yielding best-so-far progress throughout. Greedy placement
+ * caps well below the optimum on dense jobs (e.g. lego-shelves: every constructive heuristic
+ * places only 9–10/12), and a single GA run finds the rare one-sheet arrangement only
+ * occasionally — so running several independent searches and keeping the best turns an
+ * ~40%/run success rate into a reliable one. Bounded by the time budget and short-circuited
+ * once the area lower bound is reached (can't do better). This is the single source of truth
+ * for multi-start policy; the worker just drives it, the sync `nestPartsMultiStart` drains it.
  */
-export function nestPartsMultiStart(
+export function* nestPartsMultiStartIterative(
   input: NestingInput,
   opts: MultiStartOptions = {},
-): NestingResult {
+): Generator<NestingProgress, NestingResult, void> {
   const now = opts.now ?? Date.now;
-  const budget =
-    opts.timeBudgetMs ??
-    (input.config.timeBudgetMs && input.config.timeBudgetMs > 0
-      ? input.config.timeBudgetMs
-      : 60_000);
-  const maxStarts = opts.maxStarts ?? Infinity;
+  const budget = resolveTimeBudget(input.config, opts.timeBudgetMs);
+  const maxStarts = opts.maxStarts ?? MAX_STARTS_DEFAULT;
   const deadline = now() + budget;
   const floor = sheetLowerBound(input.parts, input.quantities, input.config.sheet);
 
   let best: NestingResult | null = null;
   let starts = 0;
-  do {
-    const result = nestParts(input);
-    if (!best || isBetterResult(result, best)) best = result;
+  while (true) {
+    const gen = nestPartsIterative(input);
+    let iter = gen.next();
+    while (!iter.done) {
+      const prog = iter.value;
+      // Surface the best completed layout once we have one (stable), else the live run.
+      yield {
+        currentSheet: prog.currentSheet,
+        generation: prog.generation,
+        result: best ?? prog.result,
+      };
+      iter = gen.next();
+    }
+    if (!best || isBetterResult(iter.value, best)) best = iter.value;
     starts++;
-    // Optimal: everything placed on the fewest sheets physically possible.
-    if (best.unplaced.length === 0 && best.sheets.length <= floor) break;
-  } while (starts < maxStarts && now() < deadline);
+    if (isOptimalResult(best, floor)) break;
+    if (starts >= maxStarts || now() >= deadline) break;
+  }
 
   return best ?? EMPTY_RESULT(input.config);
+}
+
+/** Synchronous multi-start: drains {@link nestPartsMultiStartIterative} to its best result. */
+export function nestPartsMultiStart(
+  input: NestingInput,
+  opts: MultiStartOptions = {},
+): NestingResult {
+  const gen = nestPartsMultiStartIterative(input, opts);
+  let iter = gen.next();
+  while (!iter.done) iter = gen.next();
+  return iter.value;
 }
 
 export function computeMinimumSheet(

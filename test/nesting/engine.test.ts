@@ -6,6 +6,8 @@ import {
   makeOptimizerConfig,
   nestPartsMultiStart,
   isBetterResult,
+  isOptimalResult,
+  resolveTimeBudget,
   sheetLowerBound,
   type NestingResult,
 } from '$lib/nesting/engine';
@@ -319,6 +321,24 @@ describe('multi-start helpers', () => {
       const b = result(0, [{ stripHeight: 60 }]);
       expect(isBetterResult(a, b)).toBe(true);
       expect(isBetterResult(b, a)).toBe(false);
+    });
+  });
+
+  describe('resolveTimeBudget', () => {
+    it('uses the override, then config, then the default', () => {
+      const cfg = { ...fastConfig, timeBudgetMs: 5000 };
+      expect(resolveTimeBudget(cfg, 123)).toBe(123);
+      expect(resolveTimeBudget(cfg)).toBe(5000);
+      expect(resolveTimeBudget({ ...fastConfig, timeBudgetMs: undefined })).toBe(60_000);
+      expect(resolveTimeBudget({ ...fastConfig, timeBudgetMs: 0 })).toBe(60_000);
+    });
+  });
+
+  describe('isOptimalResult', () => {
+    it('is true only when nothing is unplaced and sheets are at the floor', () => {
+      expect(isOptimalResult(result(0, [{ stripHeight: 10 }]), 1)).toBe(true);
+      expect(isOptimalResult(result(1, [{ stripHeight: 10 }]), 1)).toBe(false); // unplaced
+      expect(isOptimalResult(result(0, [{ stripHeight: 5 }, { stripHeight: 5 }]), 1)).toBe(false); // 2 > floor 1
     });
   });
 
