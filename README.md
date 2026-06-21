@@ -1,5 +1,7 @@
 # Laser Layout
 
+[![Netlify Status](https://api.netlify.com/api/v1/badges/030605ee-5bf8-4a54-9540-774d8beb0669/deploy-status)](https://app.netlify.com/projects/laser-layout/deploys)
+
 A nesting optimizer for laser cutting. Upload SVG or LightBurn (.lbrn2) design files, configure material sheet dimensions, and the app packs parts efficiently to minimize waste.
 
 ![Laser Layout screenshot showing nested parts](static/screenshot.png)
