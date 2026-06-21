@@ -3,6 +3,7 @@
   import { parseLightBurn } from '$lib/parsers/lightburn-parser';
   import { projectStore } from '$lib/stores/project.svelte';
   import { MAX_FILE_SIZE } from '$lib/parsers/constants';
+  import { tooltip } from '$lib/actions/tooltip';
 
   let dragOver = $state(false);
 
@@ -62,6 +63,7 @@
 <div
   class="upload-zone"
   class:drag-over={dragOver}
+  use:tooltip={'Upload an SVG, .lbrn, or .lbrn2 file (max 10 MB) — drop it here or click to browse.'}
   ondrop={onDrop}
   ondragover={onDragOver}
   ondragleave={onDragLeave}

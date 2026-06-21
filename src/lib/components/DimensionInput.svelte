@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toDisplayUnits, fromDisplayUnits } from '$lib/stores/project.svelte';
+  import { tooltip as tooltipAction } from '$lib/actions/tooltip';
 
   interface Props {
     /** Field label, e.g. "Width". */
@@ -10,6 +11,8 @@
     onChange: (mm: number) => void;
     /** Unique id base, used to wire the label to both inputs for a11y. */
     id: string;
+    /** Hover tooltip describing what the field controls. */
+    tooltip?: string;
     /** Minimum allowed value, in millimeters. */
     minMM?: number;
     mmStep?: number;
@@ -23,6 +26,7 @@
     valueMM,
     onChange,
     id,
+    tooltip,
     minMM = 0,
     mmStep = 1,
     inStep = 0.25,
@@ -48,7 +52,7 @@
   }
 </script>
 
-<div class="dim-field">
+<div class="dim-field" use:tooltipAction={tooltip}>
   <span class="dim-label" id="{id}-label">{label}</span>
   <div class="dim-inputs">
     <span class="unit-input">
