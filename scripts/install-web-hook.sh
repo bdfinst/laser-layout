@@ -99,7 +99,7 @@ HOOK
 chmod +x "$HOOK_FILE"
 echo "  ✓ wrote $HOOK_FILE"
 
-# --- 2. Merge settings.json (idempotent) -----------------------------------
+# --- 2. Register the SessionStart hook (idempotent) ------------------------
 [ -f "$SETTINGS_FILE" ] || echo '{}' > "$SETTINGS_FILE"
 
 TMP_SETTINGS="$(mktemp)"
@@ -110,15 +110,36 @@ jq '
       then .
       else . + [{"hooks": [{"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"}]}]
       end)
-  # Enable the plugin and register its marketplace so commands load.
-  | .enabledPlugins["dev-team@bfinster"] = true
-  | .extraKnownMarketplaces.bfinster = {
-      "source": {"source": "github", "repo": "bdfinst/agentic-dev-team"},
-      "autoUpdate": true
-    }
 ' "$SETTINGS_FILE" > "$TMP_SETTINGS"
 mv "$TMP_SETTINGS" "$SETTINGS_FILE"
-echo "  ✓ updated $SETTINGS_FILE"
+echo "  ✓ registered SessionStart hook in $SETTINGS_FILE"
+
+# --- 3. Register the plugin + marketplace at project scope -----------------
+# Prefer the `claude` CLI with --scope=project so the marketplace add / plugin
+# install are written into THIS project's .claude/settings.json. Fall back to
+# editing settings.json directly when the CLI isn't available.
+if command -v claude >/dev/null 2>&1; then
+  ( cd "$TARGET_DIR" \
+    && claude plugin marketplace add bdfinst/agentic-dev-team --scope=project \
+    && claude plugin install dev-team@bfinster --scope=project )
+  echo "  ✓ added marketplace + installed dev-team@bfinster (project scope)"
+else
+  echo "  ! claude CLI not found — registering plugin/marketplace via jq instead."
+  TMP_SETTINGS="$(mktemp)"
+  jq '
+    .enabledPlugins["dev-team@bfinster"] = true
+    | .extraKnownMarketplaces.bfinster = {
+        "source": {"source": "github", "repo": "bdfinst/agentic-dev-team"}
+      }
+  ' "$SETTINGS_FILE" > "$TMP_SETTINGS"
+  mv "$TMP_SETTINGS" "$SETTINGS_FILE"
+fi
+
+# Enable auto-update for the marketplace (third-party marketplaces default to off).
+TMP_SETTINGS="$(mktemp)"
+jq '.extraKnownMarketplaces.bfinster.autoUpdate = true' "$SETTINGS_FILE" > "$TMP_SETTINGS"
+mv "$TMP_SETTINGS" "$SETTINGS_FILE"
+echo "  ✓ enabled marketplace auto-update"
 
 echo ""
 echo "Done. Commit .claude/ to your default branch so future web sessions use it."
