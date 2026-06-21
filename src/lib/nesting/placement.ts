@@ -57,6 +57,155 @@ interface NfpCtx {
 
 const NFP_EPS = 1e-6;
 
+// Uniform-grid resolution (#42): the grid spans the shorter sheet side in this many cells,
+// so a cell is roughly part-sized for typical jobs — each placement touches a handful of
+// cells and each collision query returns O(1) neighbours instead of scanning all placements.
+const GRID_RESOLUTION = 32;
+
+/**
+ * Uniform-grid spatial index over placed parts (#42). `hasCollision` queries it for only the
+ * placements whose bounding boxes share a grid cell with the kerf-expanded query box, turning
+ * the per-candidate collision scan from O(N_placed) into a local lookup. The grid is
+ * deliberately *conservative*: it returns a superset of the placements within `kerf` of the
+ * query, never fewer. Since the subsequent `checkOverlap` re-applies the exact bbox-reject +
+ * shape/NFP test to each returned candidate (and every omitted placement would have been
+ * rejected by that bbox test anyway), the collision result is byte-for-byte identical to the
+ * old full scan — the optimization is behaviour-preserving.
+ */
+interface PlacedIndex {
+  /** All placements in insertion order (read by the candidate-anchor / union passes). */
+  readonly items: CachedPlacement[];
+  /** Record a newly placed part in both the item list and the grid. */
+  add(cp: CachedPlacement): void;
+  /**
+   * Placements whose cells meet the kerf-expanded query box. The returned array is a shared
+   * buffer — consume it before the next `query` call (all callers do so synchronously).
+   */
+  query(bb: BoundingBox, kerf: number): CachedPlacement[];
+}
+
+function createPlacedIndex(sheet: MaterialSheet): PlacedIndex {
+  const span = Math.min(sheet.width, sheet.height);
+  const cell = Math.max(1, span / GRID_RESOLUTION);
+  const cols = Math.max(1, Math.ceil(sheet.width / cell) + 1);
+  const items: CachedPlacement[] = [];
+  const buckets = new Map<number, number[]>();
+  // Per-query dedupe stamps: a placement spanning several cells must be returned once. The
+  // generation counter avoids clearing the array between queries.
+  let stamps = new Int32Array(0);
+  let queryGen = 0;
+  // Reused output buffer — a query's result must be consumed before the next query.
+  const scratch: CachedPlacement[] = [];
+
+  const col = (x: number): number => {
+    const c = Math.floor(x / cell);
+    return c < 0 ? 0 : c >= cols ? cols - 1 : c;
+  };
+  const row = (y: number): number => {
+    const r = Math.floor(y / cell);
+    return r < 0 ? 0 : r;
+  };
+  const key = (cx: number, cy: number): number => cy * cols + cx;
+
+  const add = (cp: CachedPlacement): void => {
+    const idx = items.length;
+    items.push(cp);
+    const x0 = col(cp.bb.minX);
+    const x1 = col(cp.bb.maxX);
+    const y0 = row(cp.bb.minY);
+    const y1 = row(cp.bb.maxY);
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const k = key(cx, cy);
+        const bucket = buckets.get(k);
+        if (bucket) bucket.push(idx);
+        else buckets.set(k, [idx]);
+      }
+    }
+  };
+
+  const query = (bb: BoundingBox, kerf: number): CachedPlacement[] => {
+    if (stamps.length < items.length) {
+      const next = new Int32Array(items.length * 2 + 8);
+      next.set(stamps);
+      stamps = next;
+    }
+    const gen = ++queryGen;
+    scratch.length = 0;
+    const x0 = col(bb.minX - kerf);
+    const x1 = col(bb.maxX + kerf);
+    const y0 = row(bb.minY - kerf);
+    const y1 = row(bb.maxY + kerf);
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const bucket = buckets.get(key(cx, cy));
+        if (!bucket) continue;
+        for (const idx of bucket) {
+          if (stamps[idx] === gen) continue;
+          stamps[idx] = gen;
+          scratch.push(items[idx]);
+        }
+      }
+    }
+    return scratch;
+  };
+
+  return { items, add, query };
+}
+
+interface PositionHeap {
+  readonly size: number;
+  pop(): ScoredPosition;
+}
+
+/**
+ * Binary min-heap of candidate positions (#42, partial-sort). `tryAdjacentPositions` only ever
+ * consumes a bounded prefix of the candidates in `better`-order (it stops once the validate
+ * budget is met), so building a heap in O(N) and extracting the few it needs in O(log N) each
+ * beats fully sorting all candidates O(N log N). Extraction order matches the old stable sort
+ * for every candidate that differs; the only ties are candidates at the *same* (x, y), which
+ * resolve to an identical placement regardless of order — so the result is behaviour-preserving.
+ * Heapifies `d` in place.
+ */
+function createPositionHeap(
+  d: ScoredPosition[],
+  less: (a: ScoredPosition, b: ScoredPosition) => boolean,
+): PositionHeap {
+  const siftDown = (start: number): void => {
+    const n = d.length;
+    let i = start;
+    for (;;) {
+      const l = 2 * i + 1;
+      const r = 2 * i + 2;
+      let m = i;
+      if (l < n && less(d[l], d[m])) m = l;
+      if (r < n && less(d[r], d[m])) m = r;
+      if (m === i) break;
+      const tmp = d[i];
+      d[i] = d[m];
+      d[m] = tmp;
+      i = m;
+    }
+  };
+
+  for (let i = (d.length >> 1) - 1; i >= 0; i--) siftDown(i);
+
+  return {
+    get size(): number {
+      return d.length;
+    },
+    pop(): ScoredPosition {
+      const top = d[0];
+      const last = d.pop()!;
+      if (d.length > 0) {
+        d[0] = last;
+        siftDown(0);
+      }
+      return top;
+    },
+  };
+}
+
 /** Quantized vertex signature — stable, instance-unifying NFP cache key for a polygon. */
 function polySignature(poly: Polygon): string {
   let s = '';
@@ -115,7 +264,7 @@ export function bottomLeftFill(
   nfpCache: NfpCache | null = null,
 ): PlacedPart[] {
   const placed: PlacedPart[] = [];
-  const cache: CachedPlacement[] = [];
+  const cache = createPlacedIndex(sheet);
   let holes: CachedHole[] = [];
   const useNfp = exact && nfpCache != null;
 
@@ -195,13 +344,20 @@ export function bottomLeftFill(
         localPoly: normalized,
         sig,
       };
-      cache.push(cp);
+      cache.add(cp);
 
       if (result.hole) {
         result.hole.innerPlacements.push(cp);
       } else {
         // Only extract holes from parts placed on the sheet (no recursive nesting)
-        const newHoles = extractHoles(part, rot, result.position, cache.length - 1, kerf, mirror);
+        const newHoles = extractHoles(
+          part,
+          rot,
+          result.position,
+          cache.items.length - 1,
+          kerf,
+          mirror,
+        );
         holes = [...holes, ...newHoles];
       }
     }
@@ -435,7 +591,7 @@ function slideBottomLeft(
   x: number,
   y: number,
   partBB: { width: number; height: number },
-  cache: CachedPlacement[],
+  cache: PlacedIndex,
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
@@ -486,7 +642,7 @@ interface ScoredPosition {
 function tryAdjacentPositions(
   normalizedPoly: Polygon,
   partBB: { width: number; height: number },
-  cache: CachedPlacement[],
+  cache: PlacedIndex,
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
@@ -498,9 +654,9 @@ function tryAdjacentPositions(
   // collision), so we cap how many positions we validate and slide rather than checking
   // every one.
   const bl = (x: number, y: number) => y * sheet.width + x;
-  const union = nfpCtx ? placedUnionBB(cache) : null;
+  const union = nfpCtx ? placedUnionBB(cache.items) : null;
   const positions: { x: number; y: number }[] = [];
-  for (const cp of cache) {
+  for (const cp of cache.items) {
     for (const pos of candidateAnchors(cp, partBB, kerf)) positions.push(pos);
     // Concavity anchors only matter under exact collision (bbox approximation rejects
     // them anyway), so skip them during the fast GA search.
@@ -536,7 +692,9 @@ function tryAdjacentPositions(
 
   const better = (a: ScoredPosition, b: ScoredPosition) =>
     nfpCtx ? a.strip - b.strip || a.bl - b.bl : a.bl - b.bl;
-  inSheet.sort(better);
+  // Partial-sort (#42): heapify in O(N) and extract the few candidates the budget consumes in
+  // `better`-order, instead of fully sorting every in-sheet candidate up front.
+  const heap = createPositionHeap(inSheet, (a, b) => better(a, b) < 0);
 
   // The NFP path validates a larger budget — the exact phase is short, and the compact
   // seat must not be missed just because lower-y exterior candidates fill the budget.
@@ -546,8 +704,9 @@ function tryAdjacentPositions(
   let best: ScoredPosition | null = null;
   let validated = 0;
   let slid = 0;
-  for (const pos of inSheet) {
+  while (heap.size > 0) {
     if (validated >= VALIDATE_BUDGET) break;
+    const pos = heap.pop();
     if (hasCollision(normalizedPoly, pos.x, pos.y, cache, sheet, kerf, exact, nfpCtx)) continue;
     validated++;
     let cand = pos;
@@ -581,7 +740,7 @@ function tryAdjacentPositions(
 function tryGridFallback(
   normalizedPoly: Polygon,
   partBB: { width: number; height: number },
-  cache: CachedPlacement[],
+  cache: PlacedIndex,
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
@@ -610,7 +769,7 @@ function tryGridFallback(
 function findBestPosition(
   normalizedPoly: Polygon,
   partBB: { width: number; height: number },
-  cache: CachedPlacement[],
+  cache: PlacedIndex,
   holes: CachedHole[],
   sheet: MaterialSheet,
   kerf: number,
@@ -699,7 +858,7 @@ function hasCollision(
   poly: Polygon,
   x: number,
   y: number,
-  cache: CachedPlacement[],
+  cache: PlacedIndex,
   sheet: MaterialSheet,
   kerf: number,
   exact: boolean,
@@ -712,5 +871,9 @@ function hasCollision(
     return true;
   }
 
-  return checkOverlap(translated, bb, cache, kerf, exact, nfpCtx);
+  // Spatial-index query (#42): test only placements whose cells meet the kerf-expanded query
+  // box. checkOverlap re-applies the exact bbox-reject to each, so the result is identical to
+  // scanning every placement — every placement the grid omits would fail that bbox test anyway.
+  const candidates = cache.query(bb, kerf);
+  return checkOverlap(translated, bb, candidates, kerf, exact, nfpCtx);
 }
