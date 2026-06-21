@@ -22,11 +22,16 @@ export interface ProjectState {
 }
 
 const DEFAULT_CONFIG: NestingConfig = {
-  sheet: { width: 762, height: 762 }, // 30 in (762 mm) square — default stock size
+  sheet: { width: 508, height: 762 }, // 20 x 30 in (508 x 762 mm) — default stock size
   kerf: 1,
   rotationSteps: 72,
   populationSize: 30,
   generations: 50,
+  // Density-first by default: search with NFP-based interlocking placement. Slower per
+  // generation, but the app optimizes for material density over nesting speed (bounded by
+  // the wall-clock budget below). Users can trade it back for speed in the UI.
+  useNfpPlacement: true,
+  timeBudgetMs: 60_000, // configurable wall-clock ceiling for a full nest
 };
 
 export function toDisplayUnits(mm: number, units: Units): number {
@@ -87,6 +92,23 @@ function createProjectStore() {
 
     setSheetHeight(heightMM: number) {
       state.config = { ...state.config, sheet: { ...state.config.sheet, height: heightMM } };
+      state.result = null;
+    },
+
+    setGenerations(n: number) {
+      const g = Math.max(1, Math.min(1000, Math.round(n)));
+      state.config = { ...state.config, generations: g };
+      state.result = null;
+    },
+
+    setUseNfpPlacement(on: boolean) {
+      state.config = { ...state.config, useNfpPlacement: on };
+      state.result = null;
+    },
+
+    setTimeBudgetSeconds(seconds: number) {
+      const ms = Math.max(1, Math.min(600, Math.round(seconds))) * 1000;
+      state.config = { ...state.config, timeBudgetMs: ms };
       state.result = null;
     },
 

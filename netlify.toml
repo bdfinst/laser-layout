@@ -1,0 +1,11 @@
+# Netlify configuration for the Laser Layout SvelteKit app.
+#
+# The project uses @sveltejs/adapter-auto, which detects the Netlify build
+# environment and produces the appropriate serverless output automatically.
+# `build` is that adapter's default static output directory.
+[build]
+  command = "npm run build"
+  publish = "build"
+
+[build.environment]
+  NODE_VERSION = "22"

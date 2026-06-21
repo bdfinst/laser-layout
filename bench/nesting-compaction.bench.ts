@@ -117,6 +117,50 @@ describe('nesting compaction benchmark', () => {
       }
     }
 
+    // Epic #24 KPI: lego-shelves on the 20x30 in (508x762 mm) default stock sheet, which a
+    // human nests onto a single sheet. Reported separately because it is non-square and
+    // lego-specific. Flip `useNfpPlacement` to measure the NFP placement path (P3–P5).
+    {
+      const { parts, quantities } = loadFixture('lego-shelves.lbrn2');
+      const [w, h] = [508, 762];
+      for (const useNfpPlacement of [false, true]) {
+        const config: NestingConfig = {
+          sheet: { width: w, height: h },
+          kerf: 1,
+          rotationSteps: 72,
+          populationSize: 30,
+          generations: 40,
+          useNfpPlacement,
+        };
+        const agg = { sheets: 0, placed: 0, unplaced: 0, usedArea: 0, trueFill: 0, ms: 0 };
+        for (const seed of SEEDS) {
+          seedRandom(seed);
+          const t0 = performance.now();
+          const res = nestParts({ parts, quantities, config });
+          agg.ms += performance.now() - t0;
+          const r = kpis(res, w);
+          agg.sheets += r.sheets;
+          agg.placed += r.placed;
+          agg.unplaced += r.unplaced;
+          agg.usedArea += r.usedArea;
+          agg.trueFill += r.trueFill;
+        }
+        const n = SEEDS.length;
+        rows.push(
+          [
+            `lego-shelves[nfp=${useNfpPlacement ? 1 : 0}]`,
+            `${w}x${h}`,
+            (agg.sheets / n).toFixed(2),
+            (agg.placed / n).toFixed(1),
+            (agg.unplaced / n).toFixed(1),
+            `${Math.round(agg.usedArea / n)}`,
+            (agg.trueFill / n).toFixed(4),
+            `${Math.round(agg.ms / n)}`,
+          ].join('\t'),
+        );
+      }
+    }
+
     Math.random = orig;
     console.log('\n' + rows.join('\n') + '\n');
   });
