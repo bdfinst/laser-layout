@@ -9,8 +9,14 @@ import {
 export type WorkerMessage = { type: 'start'; input: NestingInput };
 
 export type WorkerResponse =
-  | { type: 'progress'; currentSheet: number; generation: number; result: NestingResult }
-  | { type: 'done'; result: NestingResult }
+  | {
+      type: 'progress';
+      currentSheet: number;
+      generation: number;
+      result: NestingResult;
+      starts: number;
+    }
+  | { type: 'done'; result: NestingResult; starts: number }
   | { type: 'error'; message: string };
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
@@ -40,25 +46,36 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     const deadline = Date.now() + resolveTimeBudget(input.config);
     const gen = nestPartsMultiStartIterative(input);
     let lastResult: NestingResult | null = null;
+    let lastStarts = 0;
 
     function step() {
       try {
         if (Date.now() >= deadline && lastResult) {
-          self.postMessage({ type: 'done', result: lastResult } satisfies WorkerResponse);
+          self.postMessage({
+            type: 'done',
+            result: lastResult,
+            starts: lastStarts,
+          } satisfies WorkerResponse);
           return;
         }
 
         const iter = gen.next();
         if (iter.done) {
-          self.postMessage({ type: 'done', result: iter.value } satisfies WorkerResponse);
+          self.postMessage({
+            type: 'done',
+            result: iter.value,
+            starts: lastStarts,
+          } satisfies WorkerResponse);
         } else {
           const progress: NestingProgress = iter.value;
           lastResult = progress.result;
+          lastStarts = progress.starts ?? lastStarts;
           self.postMessage({
             type: 'progress',
             currentSheet: progress.currentSheet,
             generation: progress.generation,
             result: progress.result,
+            starts: lastStarts,
           } satisfies WorkerResponse);
           setTimeout(step, 0);
         }
