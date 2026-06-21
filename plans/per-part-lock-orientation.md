@@ -247,9 +247,9 @@ See per-step ratings. Most steps are `standard`; type/guard steps are `trivial`.
 
 #### Wave 2
 
-- [ ] Slice 2: Persist the choice in the project store
-  - [ ] Step 2.1: Add `lockedOrientation` map + `setLockOrientation`
-  - [ ] Step 2.2: Re-apply lock map in `runDedup`; clear in `reset`
+- [x] Slice 2: Persist the choice in the project store
+  - [x] Step 2.1: Add `lockedOrientation` map + `setLockOrientation`
+  - [x] Step 2.2: Re-apply lock map in `runDedup`; clear in `reset`
 
 #### Wave 3
 
