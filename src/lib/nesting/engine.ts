@@ -6,7 +6,7 @@ import {
   type OptimizeProgress,
 } from './optimizer';
 import { computeSheetStats } from './stats';
-import { boundingBox } from '$lib/geometry/polygon';
+import { boundingBox, polygonArea } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
 
 export interface NestingInput {
@@ -246,6 +246,89 @@ export function nestParts(
   }
 
   return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
+}
+
+/** Total used material area of a result: sum over sheets of stripHeight × sheet width. Lower is denser. */
+function usedArea(result: NestingResult): number {
+  return result.sheets.reduce((sum, s) => sum + s.stripHeight * result.sheetWidth, 0);
+}
+
+/**
+ * Strict "is a strictly better nest" comparator for multi-start. Feasibility first (fewer
+ * unplaced parts), then fewer sheets, then a denser pack (less used material area).
+ */
+export function isBetterResult(a: NestingResult, b: NestingResult): boolean {
+  if (a.unplaced.length !== b.unplaced.length) return a.unplaced.length < b.unplaced.length;
+  if (a.sheets.length !== b.sheets.length) return a.sheets.length < b.sheets.length;
+  return usedArea(a) < usedArea(b);
+}
+
+/** True area (outer minus cutouts) of a part's polygons. */
+function partTrueArea(part: Part): number {
+  let area = polygonArea(part.polygons[0]);
+  for (let i = 1; i < part.polygons.length; i++) area -= polygonArea(part.polygons[i]);
+  return area;
+}
+
+/**
+ * Area lower bound on sheet count: a job whose parts total `A` of true area can never fit on
+ * fewer than `ceil(A / sheetArea)` sheets. Multi-start stops once it reaches this bound with
+ * everything placed, since no further restart can do better.
+ */
+export function sheetLowerBound(
+  parts: Part[],
+  quantities: Map<string, number>,
+  sheet: { width: number; height: number },
+): number {
+  const sheetArea = sheet.width * sheet.height;
+  if (sheetArea <= 0) return 1;
+  let total = 0;
+  for (const part of parts) total += partTrueArea(part) * (quantities.get(part.id) ?? 1);
+  return Math.max(1, Math.ceil(total / sheetArea));
+}
+
+export interface MultiStartOptions {
+  /** Wall-clock budget across all starts (ms). Defaults to the config's timeBudgetMs or 60s. */
+  timeBudgetMs?: number;
+  /** Hard cap on the number of starts (mainly for deterministic tests). */
+  maxStarts?: number;
+  /** Injectable clock for tests. */
+  now?: () => number;
+}
+
+/**
+ * Multi-start nesting: repeat the whole nest with the RNG advancing between starts and keep
+ * the best result. Greedy placement caps well below the optimum on dense jobs (e.g.
+ * lego-shelves: every constructive heuristic places only 9–10/12), and a single GA run finds
+ * the rare one-sheet arrangement only occasionally — so running several independent searches
+ * and keeping the best turns an ~40%/run success rate into a reliable one. Bounded by the
+ * time budget and short-circuited once the area lower bound is reached (can't do better).
+ */
+export function nestPartsMultiStart(
+  input: NestingInput,
+  opts: MultiStartOptions = {},
+): NestingResult {
+  const now = opts.now ?? Date.now;
+  const budget =
+    opts.timeBudgetMs ??
+    (input.config.timeBudgetMs && input.config.timeBudgetMs > 0
+      ? input.config.timeBudgetMs
+      : 60_000);
+  const maxStarts = opts.maxStarts ?? Infinity;
+  const deadline = now() + budget;
+  const floor = sheetLowerBound(input.parts, input.quantities, input.config.sheet);
+
+  let best: NestingResult | null = null;
+  let starts = 0;
+  do {
+    const result = nestParts(input);
+    if (!best || isBetterResult(result, best)) best = result;
+    starts++;
+    // Optimal: everything placed on the fewest sheets physically possible.
+    if (best.unplaced.length === 0 && best.sheets.length <= floor) break;
+  } while (starts < maxStarts && now() < deadline);
+
+  return best ?? EMPTY_RESULT(input.config);
 }
 
 export function computeMinimumSheet(

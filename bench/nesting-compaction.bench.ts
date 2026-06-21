@@ -4,7 +4,7 @@ import { resolve } from 'path';
 import { parseLightBurn } from '$lib/parsers/lightburn-parser';
 import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
 import { deduplicateParts } from '$lib/geometry/dedup';
-import { nestParts, type NestingResult } from '$lib/nesting/engine';
+import { nestParts, nestPartsMultiStart, type NestingResult } from '$lib/nesting/engine';
 import { getPlacedPolygons, boundingBox, polygonArea } from '$lib/geometry/polygon';
 import type { NestingConfig, Part } from '$lib/geometry/types';
 
@@ -159,6 +159,49 @@ describe('nesting compaction benchmark', () => {
           ].join('\t'),
         );
       }
+    }
+
+    // Multi-start KPI: the real product strategy (repeat the nest, keep the best, stop at the
+    // area lower bound) on the default stock sheet. This is the row that should reach 1 sheet.
+    {
+      const { parts, quantities } = loadFixture('lego-shelves.lbrn2');
+      const [w, h] = [508, 762];
+      const config: NestingConfig = {
+        sheet: { width: w, height: h },
+        kerf: 1,
+        rotationSteps: 72,
+        populationSize: 30,
+        generations: 40,
+        useNfpPlacement: true,
+      };
+      const agg = { sheets: 0, placed: 0, unplaced: 0, usedArea: 0, trueFill: 0, ms: 0 };
+      for (const seed of SEEDS) {
+        seedRandom(seed);
+        const t0 = performance.now();
+        // Bounded so `npm run bench` stays under its timeout; the app's budget is larger and
+        // user-adjustable, so production reaches one sheet more often than this row shows.
+        const res = nestPartsMultiStart({ parts, quantities, config }, { timeBudgetMs: 40_000 });
+        agg.ms += performance.now() - t0;
+        const r = kpis(res, w);
+        agg.sheets += r.sheets;
+        agg.placed += r.placed;
+        agg.unplaced += r.unplaced;
+        agg.usedArea += r.usedArea;
+        agg.trueFill += r.trueFill;
+      }
+      const n = SEEDS.length;
+      rows.push(
+        [
+          'lego-shelves[multistart]',
+          `${w}x${h}`,
+          (agg.sheets / n).toFixed(2),
+          (agg.placed / n).toFixed(1),
+          (agg.unplaced / n).toFixed(1),
+          `${Math.round(agg.usedArea / n)}`,
+          (agg.trueFill / n).toFixed(4),
+          `${Math.round(agg.ms / n)}`,
+        ].join('\t'),
+      );
     }
 
     Math.random = orig;

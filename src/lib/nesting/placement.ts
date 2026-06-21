@@ -120,33 +120,64 @@ export function bottomLeftFill(
   const useNfp = exact && nfpCache != null;
 
   for (const { part, rotation, mirror } of parts) {
-    const outerPoly = mirror ? reflectPolygon(part.polygons[0]) : part.polygons[0];
-    const rotated = rotatePolygon(outerPoly, rotation);
-    const bb = boundingBox(rotated);
-    const normalized = translatePolygon(rotated, -bb.minX, -bb.minY);
-    const partW = bb.width;
-    const partH = bb.height;
+    // Orientation-retry (density path only): a part whose gene rotation can't be placed at
+    // all may still fit a tall pocket when turned 90° (observed on lego-shelves: ~190×104
+    // panels that only seat portrait). This is a strict RESCUE — the orthogonal is tried
+    // only when the gene rotation fails to place, so placements that already succeed are
+    // untouched and other fixtures don't regress. Off the NFP path the fast bbox search and
+    // all non-opt-in callers stay byte-for-byte unchanged.
+    const rotationsToTry = useNfp ? [rotation, rotation + Math.PI / 2] : [rotation];
 
-    if (partW > sheet.width || partH > sheet.height) {
-      continue;
+    let chosen: {
+      rotation: number;
+      normalized: Polygon;
+      partW: number;
+      partH: number;
+      sig: string;
+      result: PlacementResult;
+      top: number;
+    } | null = null;
+
+    for (const rot of rotationsToTry) {
+      const outerPoly = mirror ? reflectPolygon(part.polygons[0]) : part.polygons[0];
+      const rotated = rotatePolygon(outerPoly, rot);
+      const bb = boundingBox(rotated);
+      const normalized = translatePolygon(rotated, -bb.minX, -bb.minY);
+      const partW = bb.width;
+      const partH = bb.height;
+
+      if (partW > sheet.width || partH > sheet.height) continue;
+
+      const sig = useNfp ? polySignature(normalized) : '';
+      const nfpCtx: NfpCtx | undefined =
+        useNfp && nfpCache
+          ? { cache: nfpCache, movingSig: sig, movingPoly: normalized }
+          : undefined;
+
+      const result = findBestPosition(
+        normalized,
+        { width: partW, height: partH },
+        cache,
+        holes,
+        sheet,
+        kerf,
+        exact,
+        nfpCtx,
+      );
+      if (!result) continue;
+      chosen = { rotation: rot, normalized, partW, partH, sig, result, top: 0 };
+      break; // gene rotation preferred; orthogonal is a rescue only when it fails to place
     }
 
-    const sig = useNfp ? polySignature(normalized) : '';
-    const nfpCtx: NfpCtx | undefined =
-      useNfp && nfpCache ? { cache: nfpCache, movingSig: sig, movingPoly: normalized } : undefined;
-
-    const result = findBestPosition(
-      normalized,
-      { width: partW, height: partH },
-      cache,
-      holes,
-      sheet,
-      kerf,
-      exact,
-      nfpCtx,
-    );
-    if (result) {
-      const pp: PlacedPart = { part, x: result.position.x, y: result.position.y, rotation, mirror };
+    if (chosen) {
+      const { rotation: rot, normalized, partW, partH, sig, result } = chosen;
+      const pp: PlacedPart = {
+        part,
+        x: result.position.x,
+        y: result.position.y,
+        rotation: rot,
+        mirror,
+      };
       placed.push(pp);
       const finalPoly = translatePolygon(normalized, result.position.x, result.position.y);
       const finalBB: BoundingBox = {
@@ -170,14 +201,7 @@ export function bottomLeftFill(
         result.hole.innerPlacements.push(cp);
       } else {
         // Only extract holes from parts placed on the sheet (no recursive nesting)
-        const newHoles = extractHoles(
-          part,
-          rotation,
-          result.position,
-          cache.length - 1,
-          kerf,
-          mirror,
-        );
+        const newHoles = extractHoles(part, rot, result.position, cache.length - 1, kerf, mirror);
         holes = [...holes, ...newHoles];
       }
     }
@@ -565,7 +589,12 @@ function tryGridFallback(
 ): PlacementResult | null {
   const maxX = sheet.width - partBB.width;
   const maxY = sheet.height - partBB.height;
-  const step = Math.max(partBB.width, partBB.height, 10);
+  // Density path: a fine grid finds tight interior pockets the coarse part-sized step skips
+  // (e.g. a panel that only seats deep in a side gap). Bottom-up, left-to-right keeps the
+  // bottom-left preference. Cost is bounded and only paid when the cheap anchor phases fail.
+  const step = nfpCtx
+    ? Math.max(8, Math.min(partBB.width, partBB.height) / 4)
+    : Math.max(partBB.width, partBB.height, 10);
 
   for (let y = 0; y <= maxY; y += step) {
     for (let x = 0; x <= maxX; x += step) {

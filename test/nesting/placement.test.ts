@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { bottomLeftFill } from '$lib/nesting/placement';
+import { createNfpCache } from '$lib/nesting/nfp-cache';
 import { getPlacedPolygons, boundingBox } from '$lib/geometry/polygon';
 import { polygonsOverlap, polygonsCloserThan } from '$lib/nesting/nfp';
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
@@ -102,6 +103,35 @@ describe('bottomLeftFill', () => {
       rotation: 0,
     }));
     expect(bottomLeftFill(parts, sheet)).toHaveLength(10);
+  });
+
+  it('rescues a part that only fits when rotated 90° (density/NFP path)', () => {
+    // 200×40 part cannot fit a 100×300 sheet at rotation 0 (200 > 100 wide), but fits when
+    // turned to 40×200. The density path retries +90° as a rescue when the gene rotation
+    // fails to place.
+    const tall: MaterialSheet = { width: 100, height: 300 };
+    const cache = createNfpCache();
+    const result = bottomLeftFill(
+      [{ part: makePart('wide', 200, 40), rotation: 0 }],
+      tall,
+      1,
+      true,
+      cache,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].rotation).toBeCloseTo(Math.PI / 2, 5);
+  });
+
+  it('does NOT rescue-rotate on the fast (non-NFP) path — fast path unchanged', () => {
+    const tall: MaterialSheet = { width: 100, height: 300 };
+    // No NFP cache ⇒ fast path; a 200×40 part stays at rotation 0 and cannot be placed.
+    const result = bottomLeftFill(
+      [{ part: makePart('wide', 200, 40), rotation: 0 }],
+      tall,
+      1,
+      true,
+    );
+    expect(result).toHaveLength(0);
   });
 });
 
