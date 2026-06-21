@@ -78,13 +78,32 @@ export interface Individual {
   placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
 }
 
+/**
+ * Snap an arbitrary rotation to the nearest grain-allowed angle (0° or 180°). Grain /
+ * directional materials may only be cut along the grain, so cross-grain rotations (90°,
+ * 270°, …) are folded onto whichever of {0, π} is closest after normalizing to [0, 2π).
+ */
+export function snapToGrain(rotation: number): number {
+  const TWO_PI = 2 * Math.PI;
+  const r = ((rotation % TWO_PI) + TWO_PI) % TWO_PI; // normalize to [0, 2π)
+  // Distance to 0 wraps around 2π, so compare against both ends and π.
+  const toZero = Math.min(r, TWO_PI - r);
+  const toPi = Math.abs(r - Math.PI);
+  return toZero <= toPi ? 0 : Math.PI;
+}
+
 export function toOrderedParts(
   individual: Individual,
   parts: Part[],
 ): { part: Part; rotation: number; mirror: boolean }[] {
   return individual.order.map((idx, i) => ({
     part: parts[idx],
-    rotation: individual.rotations[i],
+    // A grain-constrained part may only sit at 0°/180° (#43). Like the mirror clamp below,
+    // this is a consumption-time snap keyed by part index, so it holds across every GA path
+    // (random init, crossover, mutation, seeds) without constraining the rotation gene.
+    rotation: parts[idx].grainConstraint
+      ? snapToGrain(individual.rotations[i])
+      : individual.rotations[i],
     // A locked part must never be mirrored, regardless of its mirror gene (#33).
     // Keyed by part index `idx` (not order position `i`), since lockOrientation is a
     // property of the part. This consumption-time clamp guarantees correctness across

@@ -29,6 +29,11 @@ export interface NestingProgress {
   result: NestingResult;
 }
 
+/** A part is required unless it explicitly opts into the "optional" quantity priority (#43). */
+function isRequired(part: Part): boolean {
+  return (part.priority ?? 'required') === 'required';
+}
+
 function expandParts(parts: Part[], quantities: Map<string, number>): Part[] {
   const expanded: Part[] = [];
   for (const part of parts) {
@@ -162,6 +167,10 @@ export function* nestPartsIterative(
   const optConfig = makeOptimizerConfig(config);
   const sheets: SheetResult[] = [];
   let sheetIndex = 0;
+  // Optional parts ride along on sheets opened for required parts but never trigger a new
+  // one (#43). Only enforced when the job actually has required parts; an all-optional job
+  // keeps the normal overflow behavior so it still nests fully.
+  const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
     const gen = optimizeIterative(remaining, config.sheet, config.kerf, optConfig);
@@ -208,6 +217,10 @@ export function* nestPartsIterative(
     const placedIds = new Set(finalPlacement.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
     sheetIndex++;
+
+    // Once every required part is placed, drop any remaining optional parts instead of
+    // opening a fresh sheet just for them.
+    if (jobHasRequired && !remaining.some(isRequired)) break;
   }
 
   return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
@@ -232,6 +245,7 @@ export function nestParts(
   const optConfig = makeOptimizerConfig(config);
   const sheets: SheetResult[] = [];
   let sheetIndex = 0;
+  const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
     const placed = optimize(remaining, config.sheet, config.kerf, optConfig, onProgress);
@@ -243,6 +257,9 @@ export function nestParts(
     const placedIds = new Set(placed.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
     sheetIndex++;
+
+    // Drop leftover optional parts rather than opening a new sheet for them (#43).
+    if (jobHasRequired && !remaining.some(isRequired)) break;
   }
 
   return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);

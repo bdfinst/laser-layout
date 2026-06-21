@@ -23,6 +23,18 @@ export interface Part {
   sourceIndex: number; // index in the original file
   /** When true, the nester must not mirror/flip this part (orientation-specific). */
   lockOrientation?: boolean;
+  /**
+   * Quantity priority. `"required"` (default) — the engine opens new sheets until every
+   * copy is placed. `"optional"` — copies that don't fit alongside the required parts are
+   * dropped rather than forcing a new sheet ("fit as many as possible").
+   */
+  priority?: 'required' | 'optional';
+  /**
+   * When true, restrict this part's rotation to 0° / 180° only (grain / directional
+   * material). Extends the per-part orientation lock: the lock forbids mirroring, this
+   * forbids cross-grain rotation. Independent flags — a part may set either or both.
+   */
+  grainConstraint?: boolean;
 }
 
 /** A placed part after nesting */

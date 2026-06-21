@@ -12,6 +12,8 @@ export interface ProjectState {
   rawParts: Part[]; // pre-dedup, for re-running dedup when tolerance changes
   quantities: Map<string, number>;
   lockedOrientation: Map<string, boolean>; // per-part "never mirror" choice, survives re-dedup
+  partPriority: Map<string, 'required' | 'optional'>; // per-part quantity priority, survives re-dedup
+  grainConstrained: Map<string, boolean>; // per-part "0°/180° only" grain lock, survives re-dedup
   config: NestingConfig;
   result: NestingResult | null;
   isNesting: boolean;
@@ -56,6 +58,8 @@ function createProjectStore() {
     rawParts: [],
     quantities: new Map(),
     lockedOrientation: new Map(),
+    partPriority: new Map(),
+    grainConstrained: new Map(),
     config: { ...DEFAULT_CONFIG },
     result: null,
     isNesting: false,
@@ -73,6 +77,8 @@ function createProjectStore() {
     state.parts = uniqueParts.map((part) => ({
       ...part,
       lockOrientation: state.lockedOrientation.get(part.id) ?? false,
+      priority: state.partPriority.get(part.id) ?? 'required',
+      grainConstraint: state.grainConstrained.get(part.id) ?? false,
     }));
     state.quantities = quantities;
     state.result = null;
@@ -107,6 +113,22 @@ function createProjectStore() {
       );
       // A lock change alters which placements are valid, so a prior result is stale.
       // (Unlike setQuantity, which leaves the result for the user to re-run.)
+      state.result = null;
+    },
+
+    setPriority(partId: string, priority: 'required' | 'optional') {
+      state.partPriority.set(partId, priority);
+      state.partPriority = new Map(state.partPriority);
+      state.parts = state.parts.map((p) => (p.id === partId ? { ...p, priority } : p));
+      // Priority changes which parts the engine may drop, so a prior result is stale.
+      state.result = null;
+    },
+
+    setGrainConstraint(partId: string, on: boolean) {
+      state.grainConstrained.set(partId, on);
+      state.grainConstrained = new Map(state.grainConstrained);
+      state.parts = state.parts.map((p) => (p.id === partId ? { ...p, grainConstraint: on } : p));
+      // A grain change alters which rotations are valid, so a prior result is stale.
       state.result = null;
     },
 
@@ -174,6 +196,8 @@ function createProjectStore() {
         rawParts: [],
         quantities: new Map(),
         lockedOrientation: new Map(),
+        partPriority: new Map(),
+        grainConstrained: new Map(),
         config: { ...DEFAULT_CONFIG },
         result: null,
         isNesting: false,
