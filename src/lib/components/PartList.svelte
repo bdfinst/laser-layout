@@ -7,6 +7,11 @@
     projectStore.setQuantity(partId, parseInt(input.value) || 0);
   }
 
+  function onLockChange(partId: string, e: Event) {
+    const input = e.target as HTMLInputElement;
+    projectStore.setLockOrientation(partId, input.checked);
+  }
+
   function fmtMm(mm: number): string {
     return mm.toFixed(1);
   }
@@ -69,9 +74,25 @@
               onchange={(e) => onQuantityChange(part.id, e)}
             />
           </div>
+          <div class="lock-orientation">
+            <input
+              type="checkbox"
+              id={`lock-${part.id}`}
+              aria-describedby="lock-orientation-hint"
+              checked={part.lockOrientation ?? false}
+              onchange={(e) => onLockChange(part.id, e)}
+            />
+            <label for={`lock-${part.id}`}>
+              Lock orientation
+              <span class="sr-only">for {part.name}</span>
+            </label>
+          </div>
         </div>
       {/each}
     </div>
+    <p id="lock-orientation-hint" class="hint">
+      Locked parts are never mirrored during nesting; rotation and placement are still optimized.
+    </p>
   </div>
 {/if}
 
@@ -150,5 +171,37 @@
     border-radius: 4px;
     text-align: center;
     font-size: 0.85rem;
+  }
+
+  .lock-orientation {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .lock-orientation label {
+    font-size: 0.75rem;
+    color: #555;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .hint {
+    margin: 0.4rem 0 0 0;
+    font-size: 0.72rem;
+    color: #888;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>

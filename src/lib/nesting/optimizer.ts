@@ -70,7 +70,7 @@ export function hasStalled(history: number[], window: number, epsilon: number): 
   return (prev - curr) / denom < epsilon; // lower fitness is better
 }
 
-interface Individual {
+export interface Individual {
   rotations: number[]; // rotation angle in radians for each part
   order: number[]; // placement order (indices into parts array)
   mirrors: boolean[]; // reflection flag for each part (#15)
@@ -78,14 +78,18 @@ interface Individual {
   placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
 }
 
-function toOrderedParts(
+export function toOrderedParts(
   individual: Individual,
   parts: Part[],
 ): { part: Part; rotation: number; mirror: boolean }[] {
   return individual.order.map((idx, i) => ({
     part: parts[idx],
     rotation: individual.rotations[i],
-    mirror: individual.mirrors[i],
+    // A locked part must never be mirrored, regardless of its mirror gene (#33).
+    // Keyed by part index `idx` (not order position `i`), since lockOrientation is a
+    // property of the part. This consumption-time clamp guarantees correctness across
+    // every GA path (random init, crossover, mutation, all seeds and generations).
+    mirror: parts[idx].lockOrientation ? false : individual.mirrors[i],
   }));
 }
 

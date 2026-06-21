@@ -11,6 +11,7 @@ export interface ProjectState {
   parts: Part[];
   rawParts: Part[]; // pre-dedup, for re-running dedup when tolerance changes
   quantities: Map<string, number>;
+  lockedOrientation: Map<string, boolean>; // per-part "never mirror" choice, survives re-dedup
   config: NestingConfig;
   result: NestingResult | null;
   isNesting: boolean;
@@ -54,6 +55,7 @@ function createProjectStore() {
     parts: [],
     rawParts: [],
     quantities: new Map(),
+    lockedOrientation: new Map(),
     config: { ...DEFAULT_CONFIG },
     result: null,
     isNesting: false,
@@ -66,7 +68,12 @@ function createProjectStore() {
   function runDedup() {
     if (state.rawParts.length === 0) return;
     const { uniqueParts, quantities } = deduplicateParts(state.rawParts, state.matchTolerance);
-    state.parts = uniqueParts;
+    // Re-apply the user's per-part lock choices as a fresh array, so the choice survives a
+    // tolerance-driven re-dedup. Parts whose id is absent from the map stay unlocked.
+    state.parts = uniqueParts.map((part) => ({
+      ...part,
+      lockOrientation: state.lockedOrientation.get(part.id) ?? false,
+    }));
     state.quantities = quantities;
     state.result = null;
   }
@@ -89,6 +96,18 @@ function createProjectStore() {
     setQuantity(partId: string, qty: number) {
       state.quantities.set(partId, Math.max(0, qty));
       state.quantities = new Map(state.quantities);
+    },
+
+    setLockOrientation(partId: string, locked: boolean) {
+      state.lockedOrientation.set(partId, locked);
+      state.lockedOrientation = new Map(state.lockedOrientation);
+      // Replace the part object (and the array) so Svelte 5 runes react.
+      state.parts = state.parts.map((p) =>
+        p.id === partId ? { ...p, lockOrientation: locked } : p,
+      );
+      // A lock change alters which placements are valid, so a prior result is stale.
+      // (Unlike setQuantity, which leaves the result for the user to re-run.)
+      state.result = null;
     },
 
     setSheetWidth(widthMM: number) {
@@ -154,6 +173,7 @@ function createProjectStore() {
         parts: [],
         rawParts: [],
         quantities: new Map(),
+        lockedOrientation: new Map(),
         config: { ...DEFAULT_CONFIG },
         result: null,
         isNesting: false,
