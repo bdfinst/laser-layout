@@ -1,6 +1,7 @@
 <script lang="ts">
   import { projectStore, toDisplayUnits } from '$lib/stores/project.svelte';
   import { boundingBox, toSVGPathD } from '$lib/geometry/polygon';
+  import { tooltip } from '$lib/actions/tooltip';
 
   function onQuantityChange(partId: string, e: Event) {
     const input = e.target as HTMLInputElement;
@@ -65,7 +66,7 @@
             <span class="size">{fmtMm(bb.width)} × {fmtMm(bb.height)} mm</span>
             <span class="size alt">{fmtIn(bb.width)} × {fmtIn(bb.height)} in</span>
           </div>
-          <div class="qty" title="Number of copies of this part to nest.">
+          <div class="qty" use:tooltip={'Number of copies of this part to nest.'}>
             <input
               type="number"
               min="0"
@@ -76,7 +77,7 @@
           </div>
           <div
             class="lock-orientation"
-            title="Never mirror this part during nesting; rotation and placement are still optimized."
+            use:tooltip={'Never mirror this part during nesting; rotation and placement are still optimized.'}
           >
             <input
               type="checkbox"

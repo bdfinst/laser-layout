@@ -1,6 +1,7 @@
 <script lang="ts">
   import { projectStore } from '$lib/stores/project.svelte';
   import DimensionInput from './DimensionInput.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   function onToleranceChange(e: Event) {
     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -76,7 +77,7 @@
   <div class="fields">
     <div
       class="field"
-      title="How many genetic-algorithm iterations to run per sheet. More generations can find tighter layouts but take longer."
+      use:tooltip={'How many genetic-algorithm iterations to run per sheet. More generations can find tighter layouts but take longer.'}
     >
       <label for="generations">Generations</label>
       <input
@@ -91,7 +92,7 @@
     </div>
     <div
       class="field"
-      title="Maximum time to spend nesting before returning the best layout found so far."
+      use:tooltip={'Maximum time to spend nesting before returning the best layout found so far.'}
     >
       <label for="time-budget">Time limit (s)</label>
       <input
@@ -106,7 +107,7 @@
     </div>
     <div
       class="field"
-      title="Search for interlocking placements for denser packing (slower). Turn off for faster nesting of simple layouts."
+      use:tooltip={'Search for interlocking placements for denser packing (slower). Turn off for faster nesting of simple layouts.'}
     >
       <label for="max-density">Maximize density</label>
       <input
@@ -127,7 +128,7 @@
   <div class="fields">
     <div
       class="field"
-      title="How closely two parts must match to be treated as identical and grouped into one entry with a quantity count. Higher groups more aggressively; lower keeps near-matches separate."
+      use:tooltip={'How closely two parts must match to be treated as identical and grouped into one entry with a quantity count. Higher groups more aggressively; lower keeps near-matches separate.'}
     >
       <label for="tolerance">Tolerance ({tolerancePct()}%)</label>
       <input

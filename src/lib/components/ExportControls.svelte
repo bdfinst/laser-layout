@@ -3,6 +3,7 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import { exportToSVG } from '$lib/exporters/svg-exporter';
   import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
+  import { tooltip } from '$lib/actions/tooltip';
   import type { WorkerResponse } from '$lib/nesting/nesting-worker';
 
   let exportFormat = $state<'svg' | 'lightburn'>('svg');
@@ -126,7 +127,7 @@
   <div class="buttons">
     <button
       class="nest-btn"
-      title="Run the nesting optimizer to pack the parts onto material sheets."
+      use:tooltip={'Run the nesting optimizer to pack the parts onto material sheets.'}
       onclick={doNest}
       disabled={!canNest()}
     >
@@ -141,20 +142,20 @@
     {#if projectStore.state.isNesting}
       <button
         class="stop-btn"
-        title="Stop nesting now and keep the best layout found so far."
+        use:tooltip={'Stop nesting now and keep the best layout found so far.'}
         onclick={stopNest}>Stop</button
       >
     {/if}
 
     {#if projectStore.state.result && !projectStore.state.isNesting}
       <div class="export-group">
-        <select bind:value={exportFormat} title="Choose the export file format.">
+        <select bind:value={exportFormat} use:tooltip={'Choose the export file format.'}>
           <option value="svg">SVG</option>
           <option value="lightburn">LightBurn (.lbrn2)</option>
         </select>
         <button
           class="export-btn"
-          title="Download the nested layout — one file per sheet."
+          use:tooltip={'Download the nested layout — one file per sheet.'}
           onclick={doExport}
         >
           Export

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toDisplayUnits, fromDisplayUnits } from '$lib/stores/project.svelte';
+  import { tooltip as tooltipAction } from '$lib/actions/tooltip';
 
   interface Props {
     /** Field label, e.g. "Width". */
@@ -51,7 +52,7 @@
   }
 </script>
 
-<div class="dim-field" title={tooltip}>
+<div class="dim-field" use:tooltipAction={tooltip}>
   <span class="dim-label" id="{id}-label">{label}</span>
   <div class="dim-inputs">
     <span class="unit-input">
