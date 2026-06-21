@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-21
 **Branch**: claude/happy-mayer-fjta2s
-**Status**: approved
+**Status**: in-progress
 
 ## Goal
 
@@ -24,12 +24,12 @@ numbers are unchanged.
 
 ## Acceptance Criteria
 
-- [ ] A per-part "Lock orientation" toggle appears in the Part List and persists through a tolerance change (re-dedup).
-- [ ] With a part locked, no placed instance of it is ever mirrored across seeds/generations (unit-proven).
-- [ ] A control (unlocked) part is not forced unmirrored by the flag.
-- [ ] Unlocked parts behave exactly as today; default is unlocked; engine/bench defaults unchanged.
-- [ ] E2e: toggling the control and nesting with a short time limit completes without error.
-- [ ] `npm run lint`, `npm run check`, `npm test`, `npx playwright test` all green.
+- [x] A per-part "Lock orientation" toggle appears in the Part List and persists through a tolerance change (re-dedup).
+- [x] With a part locked, no placed instance of it is ever mirrored across seeds/generations (unit-proven).
+- [x] A control (unlocked) part is not forced unmirrored by the flag.
+- [x] Unlocked parts behave exactly as today; default is unlocked; engine/bench defaults unchanged.
+- [x] E2e: toggling the control and nesting with a short time limit completes without error.
+- [x] `npm run lint`, `npm run check`, `npm test`, `npx playwright test` all green.
 
 ## Plan Review Summary
 
@@ -253,14 +253,14 @@ See per-step ratings. Most steps are `standard`; type/guard steps are `trivial`.
 
 #### Wave 3
 
-- [ ] Slice 3: Part List toggle + e2e
-  - [ ] Step 3.1: Add per-row "Lock orientation" control + hint
+- [x] Slice 3: Part List toggle + e2e
+  - [x] Step 3.1: Add per-row "Lock orientation" control + hint
 
 ### Acceptance Criteria
 
-- [ ] A per-part "Lock orientation" toggle appears in the Part List and persists through a tolerance change (re-dedup).
-- [ ] With a part locked, no placed instance of it is ever mirrored across seeds/generations (unit-proven).
-- [ ] A control (unlocked) part is not forced unmirrored by the flag.
-- [ ] Unlocked parts behave exactly as today; default is unlocked; engine/bench defaults unchanged.
-- [ ] E2e: toggling the control and nesting with a short time limit completes without error.
-- [ ] `npm run lint`, `npm run check`, `npm test`, `npx playwright test` all green.
+- [x] A per-part "Lock orientation" toggle appears in the Part List and persists through a tolerance change (re-dedup).
+- [x] With a part locked, no placed instance of it is ever mirrored across seeds/generations (unit-proven).
+- [x] A control (unlocked) part is not forced unmirrored by the flag.
+- [x] Unlocked parts behave exactly as today; default is unlocked; engine/bench defaults unchanged.
+- [x] E2e: toggling the control and nesting with a short time limit completes without error.
+- [x] `npm run lint`, `npm run check`, `npm test`, `npx playwright test` all green.

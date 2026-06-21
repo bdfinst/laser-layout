@@ -151,6 +151,28 @@ test.describe('Part List', () => {
     await expect(row.locator('.size', { hasText: 'mm' })).toBeVisible();
     await expect(row.locator('.size', { hasText: 'in' })).toBeVisible();
   });
+
+  test('lock orientation toggle round-trips, is labelled, and nest still completes', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.locator('#file-input').setInputFiles(FIXTURE);
+    await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 15000 });
+
+    const lock = page.locator('.lock-orientation input').first();
+    await expect(lock).not.toBeChecked();
+    await expect(lock).toHaveAttribute('id', /^lock-/);
+    // The label/for association resolves to a real accessible name (screen-reader contract).
+    await expect(lock).toHaveAccessibleName(/Lock orientation/);
+
+    await lock.check();
+    await expect(lock).toBeChecked();
+
+    await setTimeLimit(page, 10);
+    await page.locator('.nest-btn').click();
+    await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
+    await expect(page.locator('.overall-stats')).toBeVisible();
+  });
 });
 
 test.describe('Nesting', () => {
