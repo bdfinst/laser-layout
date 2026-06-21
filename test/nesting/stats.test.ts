@@ -4,8 +4,11 @@ import {
   getStripHeight,
   calculateUtilization,
   openAreaStats,
+  gravityMetric,
+  remnantStats,
 } from '$lib/nesting/stats';
 import { bottomLeftFill } from '$lib/nesting/placement';
+import type { PlacedPart } from '$lib/geometry/types';
 import { polygonArea, boundingBox } from '$lib/geometry/polygon';
 import type { Part, MaterialSheet } from '$lib/geometry/types';
 
@@ -154,5 +157,77 @@ describe('openAreaStats (true polygon area)', () => {
     expect(stats.openAreaRatio).toBeGreaterThanOrEqual(0);
     expect(stats.openAreaRatio).toBeLessThanOrEqual(1);
     expect(stats.utilization).toBeCloseTo(1 - stats.openAreaRatio);
+  });
+});
+
+// Place a single part at an explicit position (bypasses bottom-left-fill so fixtures can
+// put a part anywhere on the sheet).
+function placeAt(id: string, w: number, h: number, x: number, y: number): PlacedPart {
+  return { part: makePart(id, w, h), rotation: 0, x, y };
+}
+
+describe('gravityMetric (#41 compactness)', () => {
+  it('returns 0 for an empty placement (nothing to pull)', () => {
+    expect(gravityMetric([], sheet)).toBe(0);
+  });
+
+  it('is smaller when a part hugs the origin corner than when it sits far from it', () => {
+    const corner = gravityMetric([placeAt('a', 10, 10, 0, 0)], sheet);
+    const far = gravityMetric([placeAt('a', 10, 10, 80, 80)], sheet);
+    expect(corner).toBeLessThan(far);
+    expect(corner).toBeGreaterThanOrEqual(0);
+    expect(far).toBeLessThanOrEqual(1);
+  });
+
+  it('is smaller for a clustered pack than for the same parts scattered apart', () => {
+    const clustered = gravityMetric(
+      [placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 10, 0)],
+      sheet,
+    );
+    const scattered = gravityMetric(
+      [placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 80, 80)],
+      sheet,
+    );
+    expect(clustered).toBeLessThan(scattered);
+  });
+});
+
+describe('remnantStats (#41 largest reusable offcut)', () => {
+  it('returns the whole sheet (ratio 1) for an empty placement', () => {
+    const r = remnantStats([], sheet);
+    expect(r.largestRectRatio).toBeCloseTo(1, 5);
+    expect(r.largestRectArea).toBeCloseTo(sheet.width * sheet.height, 0);
+  });
+
+  it('returns zero for a non-positive sheet area', () => {
+    expect(remnantStats([], { width: 0, height: 100 })).toEqual({
+      largestRectArea: 0,
+      largestRectRatio: 0,
+    });
+  });
+
+  it('leaves a large contiguous remnant when one part sits in a corner', () => {
+    const r = remnantStats([placeAt('a', 30, 30, 0, 0)], sheet);
+    // A 30x30 corner part leaves a clean L-shaped offcut; the largest empty rectangle is
+    // ~70% of the sheet width (or height) by full extent — comfortably over half the sheet.
+    expect(r.largestRectRatio).toBeGreaterThan(0.6);
+  });
+
+  it('rewards a clustered pack over a scattered one (bigger contiguous offcut)', () => {
+    const clustered = remnantStats(
+      [placeAt('a', 30, 30, 0, 0), placeAt('b', 30, 30, 30, 0)],
+      sheet,
+    );
+    const scattered = remnantStats(
+      [placeAt('a', 30, 30, 0, 0), placeAt('b', 30, 30, 70, 70)],
+      sheet,
+    );
+    expect(clustered.largestRectRatio).toBeGreaterThan(scattered.largestRectRatio);
+  });
+
+  it('keeps largestRectRatio within [0,1]', () => {
+    const r = remnantStats([placeAt('a', 50, 50, 10, 10)], sheet);
+    expect(r.largestRectRatio).toBeGreaterThanOrEqual(0);
+    expect(r.largestRectRatio).toBeLessThanOrEqual(1);
   });
 });

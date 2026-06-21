@@ -59,6 +59,11 @@ export interface NestingConfig {
   // this budget is reached (checked at generation boundaries), then returns the best layout
   // so far. Undefined ⇒ the worker's default ceiling.
   timeBudgetMs?: number;
+  // Remnant-aware fitness weights (#41): a mild pull toward a clustered pack (gravity) and
+  // toward one large reusable offcut (remnant). Small by design; undefined ⇒ optimizer
+  // defaults. Set to 0 to disable a term.
+  gravityWeight?: number;
+  remnantWeight?: number;
 }
 
 /** Result for a single sheet within a multi-sheet nesting */

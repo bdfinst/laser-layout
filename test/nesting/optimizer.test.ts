@@ -85,6 +85,52 @@ describe('fitnessFromStats (pure)', () => {
     expect(f).toBe(0.5); // tiebreak term is 0 when sheetHeight is 0
     expect(Number.isFinite(f)).toBe(true);
   });
+
+  it('omitting the remnant/gravity metrics leaves fitness byte-for-byte unchanged (#41)', () => {
+    // No gravity/remnantRatio fields => their terms contribute exactly 0.
+    const f = fitnessFromStats({ openAreaRatio: 0.4, stripHeight: 30 }, 0, sheetHeight);
+    expect(f).toBeCloseTo(0.4 + 1e-3 * (30 / sheetHeight), 12);
+  });
+
+  it('prefers a larger reusable remnant when density/strip/unplaced are equal (#41)', () => {
+    const base = { openAreaRatio: 0.4, stripHeight: 30 };
+    const bigOffcut = fitnessFromStats({ ...base, remnantRatio: 0.8 }, 0, sheetHeight);
+    const scattered = fitnessFromStats({ ...base, remnantRatio: 0.2 }, 0, sheetHeight);
+    expect(bigOffcut).toBeLessThan(scattered);
+  });
+
+  it('prefers a tighter (lower-gravity) pack when everything else is equal (#41)', () => {
+    const base = { openAreaRatio: 0.4, stripHeight: 30 };
+    const tight = fitnessFromStats({ ...base, gravity: 0.1 }, 0, sheetHeight);
+    const loose = fitnessFromStats({ ...base, gravity: 0.9 }, 0, sheetHeight);
+    expect(tight).toBeLessThan(loose);
+  });
+
+  it('keeps feasibility dominant over the remnant/gravity terms (#41)', () => {
+    // Best possible remnant+gravity but one unplaced part must still lose to a fully placed,
+    // worst-remnant layout.
+    const oneUnplaced = fitnessFromStats(
+      { openAreaRatio: 0, stripHeight: 0, gravity: 0, remnantRatio: 1 },
+      1,
+      sheetHeight,
+    );
+    const allPlaced = fitnessFromStats(
+      { openAreaRatio: 1, stripHeight: 100, gravity: 1, remnantRatio: 0 },
+      0,
+      sheetHeight,
+    );
+    expect(oneUnplaced).toBeGreaterThan(allPlaced);
+  });
+
+  it('honors configurable weights, including disabling a term with weight 0 (#41)', () => {
+    const stats = { openAreaRatio: 0.4, stripHeight: 30, gravity: 0.5, remnantRatio: 0.5 };
+    const disabled = fitnessFromStats(stats, 0, sheetHeight, { gravity: 0, remnant: 0 });
+    const weighted = fitnessFromStats(stats, 0, sheetHeight, { gravity: 0.2, remnant: 0.2 });
+    // With both weights 0 the new terms vanish; the baseline is density + strip tiebreak.
+    expect(disabled).toBeCloseTo(0.4 + 1e-3 * (30 / sheetHeight), 12);
+    // A heavier remnant penalty (1 - 0.5) and gravity (0.5) make the weighted score larger.
+    expect(weighted).toBeGreaterThan(disabled);
+  });
 });
 
 describe('optimize', () => {
