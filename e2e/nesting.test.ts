@@ -167,11 +167,18 @@ test.describe('Part List', () => {
 
     await lock.check();
     await expect(lock).toBeChecked();
+    // True round-trip: unchecking returns it to the default state.
+    await lock.uncheck();
+    await expect(lock).not.toBeChecked();
+    await lock.check();
+    await expect(lock).toBeChecked();
 
     await setTimeLimit(page, 10);
     await page.locator('.nest-btn').click();
     await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
     await expect(page.locator('.overall-stats')).toBeVisible();
+    // The locked-part nest still produces placements.
+    await expect(page.locator('.overall-stats')).toContainText(/Total placed:\s*[1-9]/);
   });
 });
 
