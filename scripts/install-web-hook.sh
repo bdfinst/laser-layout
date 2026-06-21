@@ -119,9 +119,12 @@ echo "  ✓ registered SessionStart hook in $SETTINGS_FILE"
 # install are written into THIS project's .claude/settings.json. Fall back to
 # editing settings.json directly when the CLI isn't available.
 if command -v claude >/dev/null 2>&1; then
-  ( cd "$TARGET_DIR" \
-    && claude plugin marketplace add bdfinst/agentic-dev-team --scope=project \
-    && claude plugin install dev-team@bfinster --scope=project )
+  # Best-effort and idempotent: these are no-ops when already registered. The
+  # `|| true` guards keep a non-zero exit (e.g. "already installed" on some CLI
+  # versions) from aborting the script under `set -e` and skipping autoUpdate.
+  ( cd "$TARGET_DIR" || exit 1
+    claude plugin marketplace add bdfinst/agentic-dev-team --scope=project || true
+    claude plugin install dev-team@bfinster --scope=project || true )
   echo "  ✓ added marketplace + installed dev-team@bfinster (project scope)"
 else
   echo "  ! claude CLI not found — registering plugin/marketplace via jq instead."
