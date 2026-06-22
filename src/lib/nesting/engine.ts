@@ -2,6 +2,7 @@ import type { Part, PlacedPart, NestingConfig, SheetResult } from '$lib/geometry
 import {
   optimize,
   optimizeIterative,
+  COMMON_LINE_WEIGHT,
   type OptimizerConfig,
   type OptimizeProgress,
 } from './optimizer';
@@ -112,7 +113,19 @@ export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
     useNfpPlacement: config.useNfpPlacement ?? false,
     gravityWeight: config.gravityWeight,
     remnantWeight: config.remnantWeight,
+    // Common-line cutting (#43): turn on the shared-edge reward (undefined ⇒ off).
+    commonLineWeight: config.commonLineCutting ? COMMON_LINE_WEIGHT : undefined,
   };
+}
+
+/**
+ * Effective inter-part clearance for placement. Common-line cutting (#43) lets adjacent
+ * parts abut so they can share a single cut, so the kerf gap drops to 0 in that mode; the
+ * GA's shared-edge reward then drives parts edge-to-edge. Otherwise the configured kerf
+ * keeps a beam-width gap between every part.
+ */
+function placementKerf(config: NestingConfig): number {
+  return config.commonLineCutting ? 0 : config.kerf;
 }
 
 function buildSheetResult(
@@ -177,7 +190,7 @@ export function* nestPartsIterative(
   const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
-    const gen = optimizeIterative(remaining, config.sheet, config.kerf, optConfig);
+    const gen = optimizeIterative(remaining, config.sheet, placementKerf(config), optConfig);
     // eslint-disable-next-line no-useless-assignment
     let lastPlacement: PlacedPart[] = [];
 
@@ -252,7 +265,7 @@ export function nestParts(
   const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
-    const placed = optimize(remaining, config.sheet, config.kerf, optConfig, onProgress);
+    const placed = optimize(remaining, config.sheet, placementKerf(config), optConfig, onProgress);
 
     if (placed.length === 0) break;
 

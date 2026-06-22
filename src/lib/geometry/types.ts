@@ -76,6 +76,10 @@ export interface NestingConfig {
   // defaults. Set to 0 to disable a term.
   gravityWeight?: number;
   remnantWeight?: number;
+  // Common-line cutting (#43): when true, parts are allowed to abut (placement clearance
+  // drops to 0) and the GA fitness rewards coincident shared edges, so adjacent parts share
+  // a single cut line. Export then emits each shared edge once. Off by default.
+  commonLineCutting?: boolean;
 }
 
 /** Result for a single sheet within a multi-sheet nesting */

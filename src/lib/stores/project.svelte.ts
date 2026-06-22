@@ -34,6 +34,7 @@ const DEFAULT_CONFIG: NestingConfig = {
   // the wall-clock budget below). Users can trade it back for speed in the UI.
   useNfpPlacement: true,
   timeBudgetMs: 60_000, // configurable wall-clock ceiling for a full nest
+  commonLineCutting: false, // #43: opt-in shared-edge cutting; off by default
 };
 
 export function toDisplayUnits(mm: number, units: Units): number {
@@ -150,6 +151,11 @@ function createProjectStore() {
 
     setUseNfpPlacement(on: boolean) {
       state.config = { ...state.config, useNfpPlacement: on };
+      state.result = null;
+    },
+
+    setCommonLineCutting(on: boolean) {
+      state.config = { ...state.config, commonLineCutting: on };
       state.result = null;
     },
 
