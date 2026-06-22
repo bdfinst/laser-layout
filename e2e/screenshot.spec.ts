@@ -6,11 +6,11 @@ test('take screenshot of nested layout', async ({ page }) => {
   test.setTimeout(120000);
 
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto('http://localhost:9876');
+  await page.goto('/');
   await page.waitForTimeout(1000);
 
   const fileInput = page.locator('input[type="file"]');
-  await fileInput.setInputFiles(path.resolve('test-fixtures/Hot Air Balloon.lbrn2'));
+  await fileInput.setInputFiles(path.resolve('test-fixtures/lego-shelves.lbrn2'));
 
   // Wait for the file to be parsed — the "Nest Parts" button enables once
   // parts are available.
