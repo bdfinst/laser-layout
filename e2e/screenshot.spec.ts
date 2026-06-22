@@ -18,9 +18,10 @@ test('take screenshot of nested layout', async ({ page }) => {
   await nestBtn.waitFor({ timeout: 30000 });
   await page.locator('button.nest-btn:not([disabled])').waitFor({ timeout: 30000 });
 
-  // Cap the nesting time so the run converges quickly for the screenshot.
+  // Give the dense lego-shelves fixture enough time to place every part in
+  // density mode — a short budget leaves the last part unplaced.
   const timeLimit = page.locator('#time-budget');
-  await timeLimit.fill('10');
+  await timeLimit.fill('45');
   await timeLimit.blur();
 
   // Click "Nest Parts" button
