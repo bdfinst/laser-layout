@@ -339,6 +339,19 @@ test.describe('Export', () => {
     await expect(page.locator('.export-group select option')).toHaveCount(2);
   });
 
+  test('defaults the export format to LightBurn', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('#file-input').setInputFiles(FIXTURE);
+    await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+    await setTimeLimit(page, 10);
+
+    await page.locator('.nest-btn').click();
+    await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
+
+    const val = await page.locator('.export-group select').inputValue();
+    expect(val).toBe('lightburn');
+  });
+
   test('export format can be switched', async ({ page }) => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);

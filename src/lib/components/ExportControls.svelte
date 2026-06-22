@@ -12,7 +12,7 @@
   } from '$lib/nesting/nesting-coordinator';
   import { resolveTimeBudget } from '$lib/nesting/engine';
 
-  let exportFormat = $state<'svg' | 'lightburn'>('svg');
+  let exportFormat = $state<'svg' | 'lightburn'>('lightburn');
   let nest: CoordinatorHandle | null = null;
   let currentRunId = 0;
 
@@ -167,8 +167,8 @@
     {#if projectStore.state.result && !projectStore.state.isNesting}
       <div class="export-group">
         <select bind:value={exportFormat} use:tooltip={'Choose the export file format.'}>
-          <option value="svg">SVG</option>
           <option value="lightburn">LightBurn (.lbrn2)</option>
+          <option value="svg">SVG</option>
         </select>
         <button
           class="export-btn"
