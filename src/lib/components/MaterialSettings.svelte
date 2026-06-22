@@ -34,6 +34,14 @@
     projectStore.setUseNfpPlacement((e.target as HTMLInputElement).checked);
   }
 
+  function commonLineCutting(): boolean {
+    return projectStore.state.config.commonLineCutting ?? false;
+  }
+
+  function onCommonLineChange(e: Event) {
+    projectStore.setCommonLineCutting((e.target as HTMLInputElement).checked);
+  }
+
   function tolerancePct(): string {
     return (projectStore.state.matchTolerance * 100).toFixed(1);
   }
@@ -121,6 +129,22 @@
       Maximize density searches for interlocking placements — denser, but slower. Turn it off for
       simple layouts to nest much faster. Either way, nesting stops at the time limit (or when you
       press Stop) and keeps the best layout found.
+    </div>
+    <div
+      class="field"
+      use:tooltip={'Let adjacent parts share a single cut line — abutting parts touch (no kerf gap) and the shared edge is cut once, saving cut time and material.'}
+    >
+      <label for="common-line">Common-line cutting</label>
+      <input
+        id="common-line"
+        type="checkbox"
+        checked={commonLineCutting()}
+        onchange={onCommonLineChange}
+      />
+    </div>
+    <div class="tolerance-hint">
+      Common-line cutting places parts edge-to-edge so shared boundaries are cut once — less cut
+      time and material, at the cost of no spacing between parts.
     </div>
   </div>
 

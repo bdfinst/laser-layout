@@ -1,7 +1,7 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
 import { boundingBox } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
-import { openAreaStats, gravityMetric, remnantStats } from './stats';
+import { openAreaStats, gravityMetric, remnantStats, sharedEdgeRatio } from './stats';
 import { createNfpCache, type NfpCache } from './nfp-cache';
 
 /**
@@ -33,6 +33,11 @@ export const STRIP_TIEBREAK = 1e-3;
 export const GRAVITY_WEIGHT = 0.05;
 export const REMNANT_WEIGHT = 0.05;
 
+// Common-line cutting reward (#43). Larger than the remnant/gravity nudges because, when the
+// user opts into common-line cutting, sharing edges is a primary objective — but still below
+// openAreaRatio so feasibility/density stay dominant. Tunable via OptimizerConfig.
+export const COMMON_LINE_WEIGHT = 0.1;
+
 export interface FitnessStats {
   openAreaRatio: number;
   stripHeight: number;
@@ -40,26 +45,32 @@ export interface FitnessStats {
   gravity?: number;
   /** Largest reusable-offcut ratio in [0,1] (higher is better). Omit to disable the remnant term. */
   remnantRatio?: number;
+  /** Shared-boundary ratio in [0,1] (higher is better). Omit to disable common-line reward. */
+  sharedEdge?: number;
 }
 
 export function fitnessFromStats(
   stats: FitnessStats,
   unplacedCount: number,
   sheetHeight: number,
-  weights: { gravity?: number; remnant?: number } = {},
+  weights: { gravity?: number; remnant?: number; commonLine?: number } = {},
 ): number {
   const gravityWeight = weights.gravity ?? GRAVITY_WEIGHT;
   const remnantWeight = weights.remnant ?? REMNANT_WEIGHT;
+  const commonLineWeight = weights.commonLine ?? COMMON_LINE_WEIGHT;
   // Terms are opt-in by presence: when a metric is omitted its contribution is exactly 0,
   // so legacy callers (and the existing baselines) are byte-for-byte unchanged.
   const gravityTerm = stats.gravity === undefined ? 0 : gravityWeight * stats.gravity;
   const remnantTerm =
     stats.remnantRatio === undefined ? 0 : remnantWeight * (1 - stats.remnantRatio);
+  const commonLineTerm =
+    stats.sharedEdge === undefined ? 0 : commonLineWeight * (1 - stats.sharedEdge);
   return (
     unplacedCount * PENALTY_PER_UNPLACED +
     stats.openAreaRatio +
     gravityTerm +
     remnantTerm +
+    commonLineTerm +
     STRIP_TIEBREAK * (sheetHeight > 0 ? stats.stripHeight / sheetHeight : 0)
   );
 }
@@ -76,6 +87,9 @@ export interface OptimizerConfig {
   // REMNANT_WEIGHT. Set to 0 to disable a term without touching the rest of the fitness.
   gravityWeight?: number;
   remnantWeight?: number;
+  // Common-line cutting reward (#43). Undefined ⇒ the shared-edge term is OFF (legacy/default
+  // behavior unchanged). Set (e.g. to COMMON_LINE_WEIGHT) to reward shared boundaries.
+  commonLineWeight?: number;
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
@@ -271,12 +285,14 @@ export function* optimizeIterative(
   // Remnant-aware fitness weights (#41), resolved once and threaded to every evaluation.
   const gw = config.gravityWeight;
   const rw = config.remnantWeight;
+  // Common-line cutting reward (#43): undefined ⇒ off, so default runs are unchanged.
+  const cw = config.commonLineWeight;
 
   // Initialize population
   let population: Individual[] = [];
   for (let i = 0; i < config.populationSize; i++) {
     const individual = createRandomIndividual(n, angleStep, config.rotationSteps);
-    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache, gw, rw);
+    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
     population.push(individual);
   }
 
@@ -288,7 +304,7 @@ export function* optimizeIterative(
     fitness: 0,
     placement: [],
   };
-  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache, gw, rw);
+  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
   population[0] = noRotation;
 
   // Seed a few individuals with biggest-first heuristic orderings (#13).
@@ -301,7 +317,7 @@ export function* optimizeIterative(
       fitness: 0,
       placement: [],
     };
-    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache, gw, rw);
+    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
     population[s + 1] = seeded;
   }
 
@@ -339,7 +355,7 @@ export function* optimizeIterative(
       if (Math.random() < config.mutationRate) {
         child = mutate(child, angleStep, config.rotationSteps);
       }
-      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache, gw, rw);
+      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache, gw, rw, cw);
       nextGen.push(child);
     }
 
@@ -357,7 +373,7 @@ export function* optimizeIterative(
         // Switch to exact refinement: re-score the whole population with true-shape
         // collision so fitness is comparable, then reset the stall window.
         for (const ind of population)
-          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw);
+          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw, cw);
         population.sort((a, b) => a.fitness - b.fitness);
         exact = true;
         history.length = 0;
@@ -382,7 +398,7 @@ export function* optimizeIterative(
   const polishBudget = config.useNfpPlacement ? 12 : 150;
   const polished = localSearchPolish(
     population[0],
-    (ind) => evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw),
+    (ind) => evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw, cw),
     { angleStep, maxEvaluations: polishBudget },
   );
   return polished.placement;
@@ -437,6 +453,7 @@ function evaluate(
   nfpCache: NfpCache | null = null,
   gravityWeight?: number,
   remnantWeight?: number,
+  commonLineWeight?: number,
 ): number {
   const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact, nfpCache);
   individual.placement = placed; // cache for progress reporting
@@ -448,10 +465,16 @@ function evaluate(
   const gravity = gravityMetric(placed, sheet);
   const remnantRatio = remnantStats(placed, sheet).largestRectRatio;
 
-  return fitnessFromStats({ ...stats, gravity, remnantRatio }, unplacedCount, sheet.height, {
-    gravity: gravityWeight,
-    remnant: remnantWeight,
-  });
+  // Common-line cutting reward (#43): only computed when opted in (the shared-edge scan is
+  // the most expensive metric), keeping default-path evaluations untouched.
+  const sharedEdge = commonLineWeight === undefined ? undefined : sharedEdgeRatio(placed);
+
+  return fitnessFromStats(
+    { ...stats, gravity, remnantRatio, sharedEdge },
+    unplacedCount,
+    sheet.height,
+    { gravity: gravityWeight, remnant: remnantWeight, commonLine: commonLineWeight },
+  );
 }
 
 function tournamentSelect(population: Individual[], size: number = 3): Individual {

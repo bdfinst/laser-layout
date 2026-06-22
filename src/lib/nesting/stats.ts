@@ -1,4 +1,4 @@
-import type { PlacedPart, MaterialSheet } from '$lib/geometry/types';
+import type { PlacedPart, MaterialSheet, Point } from '$lib/geometry/types';
 import { boundingBox, centroid, getPlacedPolygons, polygonArea } from '$lib/geometry/polygon';
 
 // Sheet statistics for nesting results. Single source of truth for strip height and
@@ -197,4 +197,102 @@ export function remnantStats(
 
 function clampInt(value: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, value));
+}
+
+// --- Common-line cutting metric (#43) ----------------------------------------
+//
+// When two parts abut along a straight boundary, that boundary can be cut once and serve
+// both parts ("common-line cutting") — saving cut time and the kerf-width sliver of
+// material between them. The GA rewards arrangements with more shared boundary, so it
+// actively seeks edge-to-edge packings rather than merely dense ones. Pure geometry.
+
+/** Length of the collinear overlap between segment a1→a2 and b1→b2, or 0 if not collinear. */
+function collinearOverlap(a1: Point, a2: Point, b1: Point, b2: Point, tolerance: number): number {
+  const dax = a2.x - a1.x;
+  const day = a2.y - a1.y;
+  const la = Math.hypot(dax, day);
+  if (la < tolerance) return 0;
+  const ux = dax / la;
+  const uy = day / la;
+
+  // b must be parallel to a (perpendicular deviation of b's vector small relative to tol).
+  const dbx = b2.x - b1.x;
+  const dby = b2.y - b1.y;
+  if (Math.abs(ux * dby - uy * dbx) > tolerance) return 0;
+
+  // b's endpoints must lie on a's infinite line (perpendicular distance ~ 0).
+  const perp1 = (b1.x - a1.x) * uy - (b1.y - a1.y) * ux;
+  const perp2 = (b2.x - a1.x) * uy - (b2.y - a1.y) * ux;
+  if (Math.abs(perp1) > tolerance || Math.abs(perp2) > tolerance) return 0;
+
+  // Project everything onto a's direction (param from a1) and intersect the intervals.
+  const tA0 = 0;
+  const tA1 = la;
+  const tB0 = (b1.x - a1.x) * ux + (b1.y - a1.y) * uy;
+  const tB1 = (b2.x - a1.x) * ux + (b2.y - a1.y) * uy;
+  const lo = Math.max(Math.min(tA0, tA1), Math.min(tB0, tB1));
+  const hi = Math.min(Math.max(tA0, tA1), Math.max(tB0, tB1));
+  return Math.max(0, hi - lo);
+}
+
+/** Sum of collinear-overlap lengths between every edge of polyA and polyB. */
+function pairSharedEdge(polyA: Point[], polyB: Point[], tolerance: number): number {
+  let total = 0;
+  for (let i = 0; i < polyA.length; i++) {
+    const a1 = polyA[i];
+    const a2 = polyA[(i + 1) % polyA.length];
+    for (let j = 0; j < polyB.length; j++) {
+      const b1 = polyB[j];
+      const b2 = polyB[(j + 1) % polyB.length];
+      total += collinearOverlap(a1, a2, b1, b2, tolerance);
+    }
+  }
+  return total;
+}
+
+/**
+ * Total length (mm) of boundary shared between distinct placed parts — collinear, spatially
+ * overlapping edges of two different parts. Only the outer boundary of each part is
+ * considered. Bounding boxes prune pairs that can't touch, so the cost is dominated by the
+ * few genuinely-adjacent pairs. This is the raw signal common-line cutting maximizes.
+ */
+export function sharedEdgeLength(placed: PlacedPart[], tolerance: number = 0.05): number {
+  const parts = placed.map((pp) => {
+    const poly = getPlacedPolygons(pp)[0] ?? [];
+    return { poly, bb: poly.length >= 3 ? boundingBox(poly) : null };
+  });
+  let total = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const A = parts[i];
+    if (!A.bb) continue;
+    for (let j = i + 1; j < parts.length; j++) {
+      const B = parts[j];
+      if (!B.bb) continue;
+      // Prune: the bounding boxes must be within `tolerance` of overlapping on both axes.
+      if (A.bb.minX - B.bb.maxX > tolerance || B.bb.minX - A.bb.maxX > tolerance) continue;
+      if (A.bb.minY - B.bb.maxY > tolerance || B.bb.minY - A.bb.maxY > tolerance) continue;
+      total += pairSharedEdge(A.poly, B.poly, tolerance);
+    }
+  }
+  return total;
+}
+
+/**
+ * Shared-edge length normalized to [0,1] against half the total outer perimeter (the most
+ * boundary that could ever be shared, since each shared segment is one edge of two parts).
+ * The GA rewards this directly. Returns 0 when there is no perimeter to share.
+ */
+export function sharedEdgeRatio(placed: PlacedPart[], tolerance: number = 0.05): number {
+  let perimeter = 0;
+  for (const pp of placed) {
+    const poly = getPlacedPolygons(pp)[0];
+    if (!poly || poly.length < 3) continue;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+  }
+  if (perimeter <= 0) return 0;
+  return clamp(sharedEdgeLength(placed, tolerance) / (perimeter / 2), 0, 1);
 }
