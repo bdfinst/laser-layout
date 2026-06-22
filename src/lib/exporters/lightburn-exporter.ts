@@ -1,17 +1,20 @@
-import type { PlacedPart, Polygon } from '$lib/geometry/types';
+import type { PlacedPart, Point, Polygon } from '$lib/geometry/types';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
 import { escapeXml } from './xml-utils';
+import { dedupeCommonLineEdges, COMMON_LINE_TOLERANCE } from './common-line';
 
 export interface LightBurnExportOptions {
   sheetWidth: number;
   sheetHeight: number;
   appVersion?: string;
+  /** Common-line cutting (#43): emit each shared edge once instead of per part. */
+  commonLineCutting?: boolean;
 }
 
 const VERSION_RE = /^[\d.]+$/;
 
 export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExportOptions): string {
-  const { sheetWidth, sheetHeight, appVersion = '1.0' } = options;
+  const { sheetWidth, sheetHeight, appVersion = '1.0', commonLineCutting = false } = options;
   const safeVersion = VERSION_RE.test(appVersion) ? appVersion : '1.0';
 
   const lines: string[] = [];
@@ -26,10 +29,14 @@ export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExport
   lines.push('        <priority Value="0"/>');
   lines.push('    </CutSetting>');
 
-  for (const pp of placed) {
-    const polygons = getPlacedPolygons(pp);
-    for (const poly of polygons) {
-      writePathShape(lines, poly);
+  if (commonLineCutting) {
+    writeCommonLineShape(lines, dedupeCommonLineEdges(placed));
+  } else {
+    for (const pp of placed) {
+      const polygons = getPlacedPolygons(pp);
+      for (const poly of polygons) {
+        writePathShape(lines, poly);
+      }
     }
   }
 
@@ -62,6 +69,41 @@ function writePathShape(lines: string[], polygon: Polygon): void {
   }
   lines.push(`        <PrimList>${primParts.join('')}</PrimList>`);
 
+  lines.push('    </Shape>');
+}
+
+/**
+ * Emit the deduped common-line edges (#43) as a single open Path shape: a shared vertex
+ * list plus one line primitive per unique edge. Shared boundaries between abutting parts
+ * appear once, so the laser cuts each common line a single time.
+ */
+function writeCommonLineShape(lines: string[], segments: [Point, Point][]): void {
+  if (segments.length === 0) return;
+
+  const q = COMMON_LINE_TOLERANCE > 0 ? 1 / COMMON_LINE_TOLERANCE : 1e6;
+  const indexOf = new Map<string, number>();
+  const verts: Point[] = [];
+  const prims: Array<[number, number]> = [];
+
+  const vertIndex = (p: Point): number => {
+    const key = `${Math.round(p.x * q)},${Math.round(p.y * q)}`;
+    let idx = indexOf.get(key);
+    if (idx === undefined) {
+      idx = verts.length;
+      indexOf.set(key, idx);
+      verts.push(p);
+    }
+    return idx;
+  };
+
+  for (const [a, b] of segments) prims.push([vertIndex(a), vertIndex(b)]);
+
+  lines.push('    <Shape Type="Path" CutIndex="0">');
+  lines.push('        <XForm>1 0 0 1 0 0</XForm>');
+  lines.push(
+    `        <VertList>${verts.map((p) => `V${formatNum(p.x)} ${formatNum(p.y)}`).join('')}</VertList>`,
+  );
+  lines.push(`        <PrimList>${prims.map(([i, j]) => `L${i} ${j}`).join('')}</PrimList>`);
   lines.push('    </Shape>');
 }
 

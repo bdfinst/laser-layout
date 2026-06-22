@@ -12,7 +12,7 @@ import {
   type NestingResult,
 } from '$lib/nesting/engine';
 import { optimizeIterative } from '$lib/nesting/optimizer';
-import { computeSheetStats, openAreaStats } from '$lib/nesting/stats';
+import { computeSheetStats, openAreaStats, sharedEdgeLength } from '$lib/nesting/stats';
 import { bottomLeftFill } from '$lib/nesting/placement';
 import type { Part, NestingConfig } from '$lib/geometry/types';
 
@@ -55,6 +55,43 @@ beforeEach(() => {
 });
 afterEach(() => {
   Math.random = origRandom;
+});
+
+describe('common-line cutting (#43)', () => {
+  // Two identical squares on a roomy sheet. With a kerf gap and no common-line cutting they
+  // sit apart; with common-line cutting the clearance drops to 0 and the GA reward drives
+  // them edge-to-edge, producing genuine shared boundary.
+  const parts = [makePart('a', 20, 20), makePart('b', 20, 20)];
+  const quantities = new Map([
+    ['a', 1],
+    ['b', 1],
+  ]);
+  const clcConfig: NestingConfig = {
+    sheet: { width: 100, height: 100 },
+    kerf: 2,
+    rotationSteps: 4,
+    populationSize: 8,
+    generations: 10,
+    maxGenerations: 10,
+    stallWindow: 10,
+    stallEpsilon: 0.005,
+  };
+
+  it('places both parts whether or not common-line cutting is enabled', () => {
+    const off = nestParts({ parts, quantities, config: clcConfig });
+    const on = nestParts({ parts, quantities, config: { ...clcConfig, commonLineCutting: true } });
+    expect(off.totalPlaced).toBe(2);
+    expect(on.totalPlaced).toBe(2);
+  });
+
+  it('produces shared edges when enabled and none when the kerf gap is enforced', () => {
+    const off = nestParts({ parts, quantities, config: clcConfig });
+    const on = nestParts({ parts, quantities, config: { ...clcConfig, commonLineCutting: true } });
+    // Kerf 2 keeps a gap → no coincident edges on the default path.
+    expect(sharedEdgeLength(off.sheets[0].placed)).toBe(0);
+    // Common-line cutting abuts the squares → a full 20mm shared edge.
+    expect(sharedEdgeLength(on.sheets[0].placed)).toBeGreaterThan(0);
+  });
 });
 
 describe('nestParts', () => {

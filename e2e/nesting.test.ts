@@ -282,6 +282,28 @@ test.describe('Nesting', () => {
     await expect(page.locator('#max-density')).toBeChecked();
   });
 
+  test('common-line cutting toggle round-trips and a nest still completes (#43)', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.locator('#file-input').setInputFiles(FIXTURE);
+    await expect(page.locator('.part-row').first()).toBeVisible({ timeout: 5000 });
+
+    // Defaults off, is labelled, and round-trips.
+    const clc = page.locator('#common-line');
+    await expect(clc).toBeVisible();
+    await expect(clc).not.toBeChecked();
+    await expect(clc).toHaveAccessibleName(/Common-line/i);
+    await clc.check();
+    await expect(clc).toBeChecked();
+
+    // A nest completes with common-line cutting enabled, and export is offered.
+    await setTimeLimit(page, 10);
+    await page.locator('.nest-btn').click();
+    await expect(page.locator('.nest-btn')).toContainText('Nest Parts', { timeout: 120000 });
+    await expect(page.locator('.export-btn')).toBeVisible();
+  });
+
   test('stop halts nesting and keeps the best layout so far', async ({ page }) => {
     await page.goto('/');
     await page.locator('#file-input').setInputFiles(FIXTURE);

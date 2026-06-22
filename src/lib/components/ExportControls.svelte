@@ -105,18 +105,23 @@
     const result = projectStore.state.result;
     if (!result) return;
 
+    // Match export edge-merging to how the layout was nested (#43).
+    const commonLineCutting = projectStore.state.config.commonLineCutting ?? false;
+
     for (const sheet of result.sheets) {
       const suffix = result.sheets.length > 1 ? `-sheet-${sheet.sheetIndex + 1}` : '';
       if (exportFormat === 'svg') {
         const content = exportToSVG(sheet.placed, {
           sheetWidth: result.sheetWidth,
           sheetHeight: result.sheetHeight,
+          commonLineCutting,
         });
         downloadFile(content, `nested-layout${suffix}.svg`, 'image/svg+xml');
       } else {
         const content = exportToLightBurn(sheet.placed, {
           sheetWidth: result.sheetWidth,
           sheetHeight: result.sheetHeight,
+          commonLineCutting,
         });
         downloadFile(content, `nested-layout${suffix}.lbrn2`, 'application/xml');
       }

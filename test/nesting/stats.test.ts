@@ -6,6 +6,8 @@ import {
   openAreaStats,
   gravityMetric,
   remnantStats,
+  sharedEdgeLength,
+  sharedEdgeRatio,
 } from '$lib/nesting/stats';
 import { bottomLeftFill } from '$lib/nesting/placement';
 import type { PlacedPart } from '$lib/geometry/types';
@@ -229,5 +231,48 @@ describe('remnantStats (#41 largest reusable offcut)', () => {
     const r = remnantStats([placeAt('a', 50, 50, 10, 10)], sheet);
     expect(r.largestRectRatio).toBeGreaterThanOrEqual(0);
     expect(r.largestRectRatio).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('sharedEdgeLength / sharedEdgeRatio (#43 common-line cutting)', () => {
+  it('returns 0 for fewer than two parts', () => {
+    expect(sharedEdgeLength([])).toBe(0);
+    expect(sharedEdgeLength([placeAt('a', 10, 10, 0, 0)])).toBe(0);
+  });
+
+  it('measures the full shared edge between two abutting identical squares', () => {
+    // b sits immediately to the right of a; they share the full 10mm vertical edge at x=10.
+    const placed = [placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 10, 0)];
+    expect(sharedEdgeLength(placed)).toBeCloseTo(10, 6);
+  });
+
+  it('measures only the overlapping span when abutting parts are offset', () => {
+    // b is shifted up 4mm, so only 6mm of the vertical edge at x=10 is shared.
+    const placed = [placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 10, 4)];
+    expect(sharedEdgeLength(placed)).toBeCloseTo(6, 6);
+  });
+
+  it('is 0 when parts are separated by a gap (no coincident edges)', () => {
+    const placed = [placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 12, 0)];
+    expect(sharedEdgeLength(placed)).toBe(0);
+  });
+
+  it('sums shared edges across a row of three abutting squares', () => {
+    // a|b and b|c each share a 10mm edge → 20mm total.
+    const placed = [
+      placeAt('a', 10, 10, 0, 0),
+      placeAt('b', 10, 10, 10, 0),
+      placeAt('c', 10, 10, 20, 0),
+    ];
+    expect(sharedEdgeLength(placed)).toBeCloseTo(20, 6);
+  });
+
+  it('normalizes the ratio into [0,1], higher for more sharing', () => {
+    const touching = sharedEdgeRatio([placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 10, 0)]);
+    const apart = sharedEdgeRatio([placeAt('a', 10, 10, 0, 0), placeAt('b', 10, 10, 12, 0)]);
+    expect(touching).toBeGreaterThan(apart);
+    expect(apart).toBe(0);
+    expect(touching).toBeGreaterThan(0);
+    expect(touching).toBeLessThanOrEqual(1);
   });
 });
