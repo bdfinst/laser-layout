@@ -9,6 +9,8 @@ import {
   isOptimalResult,
   resolveTimeBudget,
   sheetLowerBound,
+  partitionByArea,
+  packIntoKSheets,
   type NestingResult,
 } from '$lib/nesting/engine';
 import { optimizeIterative } from '$lib/nesting/optimizer';
@@ -55,6 +57,77 @@ beforeEach(() => {
 });
 afterEach(() => {
   Math.random = origRandom;
+});
+
+describe('global multi-sheet assignment (#16)', () => {
+  // Full-width parts reduce nesting to 1D height bin-packing. With kerf=1, no two of these
+  // stack within 100mm except {48,48}, {52,40}, {40,48}; the 60 can never share a sheet.
+  // Optimal is 4 sheets: {60} {52,40} {52} {48,48}. Greedy fill-then-overflow strands them
+  // into 5; a balanced partition recovers the 4-sheet packing.
+  const heights = [60, 52, 52, 48, 48, 40];
+  const parts = heights.map((h, i) => makePart(`p${i}`, 100, h));
+  const quantities = new Map(parts.map((p) => [p.id, 1]));
+  const cfg: NestingConfig = {
+    sheet: { width: 100, height: 100 },
+    kerf: 1,
+    rotationSteps: 4,
+    populationSize: 20,
+    generations: 30,
+    maxGenerations: 60,
+    stallWindow: 12,
+    stallEpsilon: 0.005,
+  };
+
+  it('partitionByArea returns k groups containing every part, balanced by area', () => {
+    const groups = partitionByArea(parts, 4);
+    expect(groups).toHaveLength(4);
+    const ids = groups
+      .flat()
+      .map((p) => p.id)
+      .sort();
+    expect(ids).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', 'p5'].sort());
+    // The largest part (p0=60) seeds its own bin; no bin should be empty for k<=n.
+    expect(groups.every((g) => g.length >= 1)).toBe(true);
+  });
+
+  it('pads with empty groups when k exceeds the part count', () => {
+    const groups = partitionByArea(parts.slice(0, 2), 5);
+    expect(groups).toHaveLength(5);
+    expect(groups.flat()).toHaveLength(2);
+    expect(groups.filter((g) => g.length === 0)).toHaveLength(3);
+  });
+
+  it('packs into fewer sheets than greedy via balanced assignment', () => {
+    const originals = new Map(parts.map((p) => [p.id, p]));
+    const greedy = nestParts({ parts, quantities, config: cfg });
+    expect(greedy.unplaced).toHaveLength(0);
+
+    const balanced = packIntoKSheets(parts, originals, cfg, 4);
+    expect(balanced.unplaced).toHaveLength(0);
+    expect(balanced.sheets.length).toBe(4);
+    // The whole point: balanced uses strictly fewer sheets than greedy fill-then-overflow.
+    expect(balanced.sheets.length).toBeLessThan(greedy.sheets.length);
+  });
+
+  it('multi-start adopts the fewer-sheet global assignment, never more', () => {
+    const greedy = nestParts({ parts, quantities, config: cfg });
+    const multi = nestPartsMultiStart({ parts, quantities, config: cfg }, { maxStarts: 3 });
+    expect(multi.unplaced).toHaveLength(0);
+    expect(multi.sheets.length).toBeLessThanOrEqual(greedy.sheets.length);
+    expect(multi.sheets.length).toBe(4);
+    // Every part still placed (no silent drops) — totalPlaced equals the input count.
+    expect(multi.totalPlaced).toBe(parts.length);
+  });
+
+  it('does not increase sheet count when greedy is already optimal', () => {
+    // Two parts that each need their own sheet: greedy and global both use 2.
+    const big = [makePart('a', 100, 80), makePart('b', 100, 80)];
+    const q = new Map(big.map((p) => [p.id, 1]));
+    const greedy = nestParts({ parts: big, quantities: q, config: cfg });
+    const multi = nestPartsMultiStart({ parts: big, quantities: q, config: cfg }, { maxStarts: 2 });
+    expect(multi.sheets.length).toBe(greedy.sheets.length);
+    expect(multi.unplaced).toHaveLength(0);
+  });
 });
 
 describe('common-line cutting (#43)', () => {
