@@ -85,20 +85,23 @@
 
 <style>
   .upload-zone {
-    border: 2px dashed #666;
+    border: 2px dashed var(--border-strong);
     border-radius: 8px;
     padding: 2rem;
     text-align: center;
     cursor: pointer;
+    background: var(--surface-inset);
     transition:
       border-color 0.2s,
-      background-color 0.2s;
+      background-color 0.2s,
+      box-shadow 0.2s;
   }
 
   .upload-zone:hover,
   .drag-over {
-    border-color: #4a90d9;
-    background-color: #f0f6ff;
+    border-color: var(--brand);
+    background-color: rgba(46, 230, 214, 0.06);
+    box-shadow: var(--glow-brand);
   }
 
   .upload-label {
@@ -108,22 +111,23 @@
     gap: 0.5rem;
     cursor: pointer;
     font-size: 0.95rem;
-    color: #444;
+    color: var(--text-dim);
   }
 
   .icon {
     font-size: 2rem;
     font-weight: bold;
-    color: #888;
+    color: var(--brand);
+    text-shadow: var(--glow-brand);
   }
 
   .hint {
     font-size: 0.8rem;
-    color: #888;
+    color: var(--muted);
   }
 
   .file-name {
     font-weight: 600;
-    color: #2a6db0;
+    color: var(--brand);
   }
 </style>

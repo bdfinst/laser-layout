@@ -64,8 +64,8 @@
               {#each part.polygons as poly, polyIdx (polyIdx)}
                 <path
                   d={toSVGPathD(poly)}
-                  fill="#4a90d922"
-                  stroke="#4a90d9"
+                  fill="#2ee6d61f"
+                  stroke="#2ee6d6"
                   stroke-width={Math.max(bb.width, bb.height) * 0.02}
                 />
               {/each}
@@ -151,8 +151,10 @@
 
   h3 {
     margin: 0 0 0.5rem 0;
-    font-size: 1rem;
-    color: #333;
+    font-size: 0.95rem;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .parts {
@@ -164,27 +166,27 @@
   .part-row {
     display: flex;
     align-items: center;
-    /* The sidebar is narrow (320px) and each row now carries several controls
+    /* The sidebar is narrow (340px) and each row now carries several controls
        (qty, priority, grain, lock). Wrap so the controls flow onto a second line
        instead of squeezing .info to zero width and clipping the size text. */
     flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.35rem 0.5rem;
-    border: 1px solid #eee;
+    border: 1px solid var(--border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--surface-2);
   }
 
   .part-row:hover {
-    background: #f8fafc;
-    border-color: #ddd;
+    background: var(--surface-inset);
+    border-color: var(--border-strong);
   }
 
   .thumb {
     flex-shrink: 0;
-    background: #fafafa;
+    background: var(--surface-inset);
     border-radius: 4px;
-    border: 1px solid #eee;
+    border: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -203,28 +205,31 @@
   .name {
     font-size: 0.85rem;
     font-weight: 500;
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .size {
-    color: #888;
+    color: var(--text-dim);
     font-family: monospace;
     font-size: 0.75rem;
   }
 
   .size.alt {
-    color: #aaa;
+    color: var(--muted);
   }
 
   .qty input {
     width: 3.5rem;
     padding: 0.2rem 0.3rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     text-align: center;
     font-size: 0.85rem;
+    color: var(--text);
+    background: var(--surface-inset);
   }
 
   .priority {
@@ -233,10 +238,15 @@
 
   .priority select {
     padding: 0.2rem 0.3rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     font-size: 0.8rem;
-    background: #fff;
+    color: var(--text);
+    background: var(--surface-inset);
+  }
+
+  input[type='checkbox'] {
+    accent-color: var(--brand);
   }
 
   .grain,
@@ -249,14 +259,14 @@
 
   .grain label {
     font-size: 0.75rem;
-    color: #555;
+    color: var(--text-dim);
     white-space: nowrap;
     cursor: pointer;
   }
 
   .lock-orientation label {
     font-size: 0.75rem;
-    color: #555;
+    color: var(--text-dim);
     white-space: nowrap;
     cursor: pointer;
   }
@@ -264,7 +274,7 @@
   .hint {
     margin: 0.4rem 0 0 0;
     font-size: 0.72rem;
-    color: #888;
+    color: var(--muted);
   }
 
   .sr-only {

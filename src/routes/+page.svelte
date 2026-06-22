@@ -12,11 +12,19 @@
 </svelte:head>
 
 <div class="app">
+  <!-- Sticky header keeps the primary actions (Nest / Stop / Export) in view at
+       all times, so the user never has to scroll to the bottom of the page to
+       run the optimizer or download a result. -->
   <header class="banner">
-    <img class="logo" src={logoMark} alt="" width="44" height="44" />
     <div class="brand">
-      <h1>Laser Layout</h1>
-      <p class="subtitle">Nesting optimizer for laser cutting</p>
+      <img class="logo" src={logoMark} alt="" width="40" height="40" />
+      <div class="brand-text">
+        <h1>Laser Layout</h1>
+        <p class="subtitle">Nesting optimizer for laser cutting</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <ExportControls />
     </div>
   </header>
 
@@ -31,9 +39,6 @@
       <section class="card">
         <PartList />
       </section>
-      <section class="card actions">
-        <ExportControls />
-      </section>
     </aside>
 
     <main class="preview">
@@ -44,77 +49,136 @@
 
 <style>
   :global(:root) {
-    --brand: #4a90d9;
-    --brand-dark: #357abd;
-    --accent: #e74c3c;
-    --surface: #ffffff;
-    --border: #e2e8f0;
-    --text: #1f2933;
-    --muted: #64748b;
+    /* Laser-vector dark theme: deep near-black canvas, glowing cyan/neon strokes
+       that evoke vector art traced by a cutting head. */
+    --bg: #070b11;
+    --bg-2: #050810;
+    --grid-line: rgba(46, 230, 214, 0.045);
+    --surface: #0f1722;
+    --surface-2: #0b121b;
+    --surface-inset: #0a0f17;
+    --border: #1d2a39;
+    --border-strong: #2b3d53;
+
+    --text: #e7f1f8;
+    --text-dim: #a6bacb;
+    --muted: #66798d;
+
+    --brand: #2ee6d6; /* laser cyan */
+    --brand-dim: #1ba99d;
+    --laser: #39ff7a; /* neon cut-line green */
+    --accent: #ff3b6b; /* hot beam pink/red */
+    --success: #39ff7a;
+    --warn: #ffb454;
+
+    --glow-brand: 0 0 5px rgba(46, 230, 214, 0.55), 0 0 14px rgba(46, 230, 214, 0.22);
+    --glow-accent: 0 0 5px rgba(255, 59, 107, 0.6), 0 0 14px rgba(255, 59, 107, 0.25);
+    --glow-laser: 0 0 5px rgba(57, 255, 122, 0.6), 0 0 14px rgba(57, 255, 122, 0.25);
+
     --radius: 10px;
-    --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
-    --shadow-lg: 0 6px 20px rgba(15, 23, 42, 0.08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 10px 34px rgba(0, 0, 0, 0.55);
+
+    color-scheme: dark;
   }
 
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(160deg, #eef2f7 0%, #f7f9fc 100%);
-    background-attachment: fixed;
     color: var(--text);
+    background-color: var(--bg);
+    /* Faint laser-CAD grid drawn over a radial vignette. */
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+      radial-gradient(1200px 600px at 70% -10%, rgba(46, 230, 214, 0.06), transparent 60%),
+      linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%);
+    background-size:
+      28px 28px,
+      28px 28px,
+      100% 100%,
+      100% 100%;
+    background-attachment: fixed;
   }
 
   .app {
-    max-width: 1200px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 1.5rem 1rem 3rem;
+    padding: 0 1rem 3rem;
   }
 
   .banner {
-    position: relative;
+    position: sticky;
+    top: 0;
+    z-index: 50;
     display: flex;
     align-items: center;
-    gap: 0.9rem;
-    padding: 1.15rem 1.4rem;
-    margin-bottom: 1.5rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 0.85rem 1.25rem;
+    margin: 0 -1rem 1.5rem;
+    background: rgba(11, 17, 26, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-strong);
     box-shadow: var(--shadow);
-    overflow: hidden;
   }
 
-  /* Laser-themed accent strip down the left edge */
-  .banner::before {
+  /* Laser-themed accent strip along the bottom edge of the sticky header. */
+  .banner::after {
     content: '';
     position: absolute;
-    inset: 0 auto 0 0;
-    width: 4px;
-    background: linear-gradient(180deg, var(--brand) 0%, var(--accent) 100%);
+    inset: auto 0 0 0;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--brand) 30%,
+      var(--accent) 70%,
+      transparent
+    );
+    opacity: 0.7;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    min-width: 0;
   }
 
   .logo {
     flex-shrink: 0;
-    filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.12));
+    filter: drop-shadow(0 0 6px rgba(46, 230, 214, 0.5));
+  }
+
+  .brand-text {
+    min-width: 0;
   }
 
   h1 {
     margin: 0;
-    font-size: 1.6rem;
+    font-size: 1.4rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     color: var(--text);
+    text-shadow: 0 0 18px rgba(46, 230, 214, 0.25);
   }
 
   .subtitle {
-    margin: 0.2rem 0 0 0;
-    font-size: 0.85rem;
+    margin: 0.1rem 0 0 0;
+    font-size: 0.8rem;
     color: var(--muted);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
   }
 
   .layout {
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 340px 1fr;
     gap: 1.5rem;
     align-items: start;
   }
@@ -123,6 +187,13 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    /* Let the sidebar scroll independently within a tall viewport so the
+       preview stays put while the part list grows. */
+    position: sticky;
+    top: 5.5rem;
+    max-height: calc(100vh - 6.5rem);
+    overflow-y: auto;
+    padding-right: 0.25rem;
   }
 
   .card {
@@ -131,11 +202,13 @@
     border-radius: var(--radius);
     padding: 1.1rem 1.2rem;
     box-shadow: var(--shadow);
-    transition: box-shadow 0.2s;
+    transition:
+      box-shadow 0.2s,
+      border-color 0.2s;
   }
 
   .card:hover {
-    box-shadow: var(--shadow-lg);
+    border-color: var(--border-strong);
   }
 
   /* Hide cards whose component renders nothing (e.g. empty part list) */
@@ -152,14 +225,15 @@
     min-height: 400px;
   }
 
-  /* Elevate the layout preview to match the sidebar cards */
-  .preview :global(.preview-container) {
-    box-shadow: var(--shadow);
-  }
-
-  @media (max-width: 768px) {
+  @media (max-width: 860px) {
     .layout {
       grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      position: static;
+      max-height: none;
+      overflow: visible;
     }
   }
 </style>

@@ -154,18 +154,22 @@
 
   h3 {
     margin: 0 0 0.5rem 0;
-    font-size: 1rem;
-    color: #333;
+    font-size: 0.95rem;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .section-heading {
     margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
   }
 
   .hint {
     margin: 0 0 0.6rem 0;
     font-size: 0.75rem;
-    color: #888;
+    color: var(--muted);
   }
 
   .fields {
@@ -182,27 +186,40 @@
 
   label {
     font-size: 0.85rem;
-    color: #555;
+    color: var(--text-dim);
     min-width: 120px;
   }
 
   input[type='number'] {
     width: 5rem;
     padding: 0.3rem 0.4rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     font-size: 0.85rem;
     text-align: right;
+    color: var(--text);
+    background: var(--surface-inset);
+  }
+
+  input[type='number']:focus {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px rgba(46, 230, 214, 0.25);
   }
 
   input[type='range'] {
     flex: 1;
     max-width: 120px;
+    accent-color: var(--brand);
+  }
+
+  input[type='checkbox'] {
+    accent-color: var(--brand);
   }
 
   .tolerance-hint {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--muted);
     padding-left: 120px;
   }
 </style>

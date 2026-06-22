@@ -2,15 +2,16 @@
   import { projectStore, formatDual } from '$lib/stores/project.svelte';
   import { getPlacedPolygons, toSVGPathD } from '$lib/geometry/polygon';
 
+  // Neon palette tuned for glowing strokes on a dark sheet.
   const COLORS = [
-    '#e74c3c',
-    '#3498db',
-    '#2ecc71',
-    '#f39c12',
-    '#9b59b6',
-    '#1abc9c',
-    '#e67e22',
-    '#34495e',
+    '#2ee6d6',
+    '#39ff7a',
+    '#ff3b6b',
+    '#ffb454',
+    '#b78cff',
+    '#33b5ff',
+    '#ff7ad9',
+    '#9dff00',
   ];
 
   function getColor(index: number): string {
@@ -56,14 +57,41 @@
             xmlns="http://www.w3.org/2000/svg"
             class="layout-svg"
           >
+            <defs>
+              <!-- Neon glow: blur a copy of the stroke and lay the crisp stroke on top. -->
+              <filter id="laser-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="0.6" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <!-- Faint CAD grid for the sheet bed. -->
+              <pattern
+                id="sheet-grid-{sheet.sheetIndex}"
+                width="10"
+                height="10"
+                patternUnits="userSpaceOnUse"
+              >
+                <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#2ee6d6" stroke-width="0.1" />
+              </pattern>
+            </defs>
+
             <rect
               x="0"
               y="0"
               width={result.sheetWidth}
               height={result.sheetHeight}
-              fill="#fafafa"
-              stroke="#999"
+              fill="#0a0f17"
+              stroke="#2b3d53"
               stroke-width="0.5"
+            />
+            <rect
+              x="0"
+              y="0"
+              width={result.sheetWidth}
+              height={result.sheetHeight}
+              fill="url(#sheet-grid-{sheet.sheetIndex})"
             />
 
             {#if sheet.stripHeight > 0 && sheet.stripHeight < result.sheetHeight}
@@ -72,23 +100,25 @@
                 y1={sheet.stripHeight}
                 x2={result.sheetWidth}
                 y2={sheet.stripHeight}
-                stroke="#e74c3c"
+                stroke="#ff3b6b"
                 stroke-width="0.3"
                 stroke-dasharray="3,3"
               />
             {/if}
 
-            {#each sheet.placed as pp, i (pp.part.id)}
-              {@const polygons = getPlacedPolygons(pp)}
-              {#each polygons as poly, polyIdx (polyIdx)}
-                <path
-                  d={toSVGPathD(poly)}
-                  fill="{getColor(i)}22"
-                  stroke={getColor(i)}
-                  stroke-width="0.5"
-                />
+            <g filter="url(#laser-glow)">
+              {#each sheet.placed as pp, i (pp.part.id)}
+                {@const polygons = getPlacedPolygons(pp)}
+                {#each polygons as poly, polyIdx (polyIdx)}
+                  <path
+                    d={toSVGPathD(poly)}
+                    fill="{getColor(i)}1f"
+                    stroke={getColor(i)}
+                    stroke-width="0.5"
+                  />
+                {/each}
               {/each}
-            {/each}
+            </g>
           </svg>
         </div>
       </div>
@@ -102,9 +132,10 @@
 
 <style>
   .preview-container {
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
     overflow: hidden;
   }
 
@@ -112,8 +143,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 300px;
-    color: #888;
+    min-height: 320px;
+    color: var(--muted);
     font-size: 0.9rem;
   }
 
@@ -121,36 +152,38 @@
     display: flex;
     gap: 1rem;
     padding: 0.6rem 1rem;
-    background: #f0f0f0;
-    border-bottom: 1px solid #ddd;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
     font-size: 0.85rem;
     font-weight: 600;
-    color: #444;
+    color: var(--text-dim);
     flex-wrap: wrap;
     align-items: center;
     transition: background 0.3s;
   }
 
   .overall-stats.running {
-    background: #eef6ff;
-    border-bottom-color: #c4ddf6;
+    background: rgba(46, 230, 214, 0.07);
+    border-bottom-color: rgba(46, 230, 214, 0.3);
   }
 
   .gen-badge {
-    background: #4a90d9;
-    color: white;
-    padding: 0.15rem 0.5rem;
+    background: rgba(46, 230, 214, 0.15);
+    color: var(--brand);
+    border: 1px solid var(--brand-dim);
+    padding: 0.15rem 0.55rem;
     border-radius: 10px;
     font-size: 0.75rem;
     font-weight: 600;
+    box-shadow: var(--glow-brand);
   }
 
   .warning {
-    color: #e74c3c;
+    color: var(--accent);
   }
 
   .sheet-section {
-    border-top: 1px solid #eee;
+    border-top: 1px solid var(--border);
   }
 
   .sheet-section:first-of-type {
@@ -161,31 +194,36 @@
     display: flex;
     gap: 1rem;
     padding: 0.4rem 1rem;
-    background: #f8f8f8;
-    border-bottom: 1px solid #eee;
+    background: var(--surface-inset);
+    border-bottom: 1px solid var(--border);
     font-size: 0.8rem;
-    color: #555;
+    color: var(--text-dim);
     align-items: center;
   }
 
   .sheet-title {
     font-weight: 600;
-    color: #333;
+    color: var(--brand);
   }
 
   .sheet-stat {
-    color: #666;
+    color: var(--muted);
   }
 
   .svg-wrapper {
     padding: 0.75rem;
     display: flex;
     justify-content: center;
+    background:
+      radial-gradient(600px 300px at 50% 0%, rgba(46, 230, 214, 0.05), transparent 70%),
+      var(--surface);
   }
 
   .layout-svg {
     width: 100%;
-    max-height: 400px;
-    border: 1px solid #eee;
+    max-height: 460px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: #0a0f17;
   }
 </style>

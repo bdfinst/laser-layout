@@ -91,7 +91,7 @@
 
   .dim-label {
     font-size: 0.85rem;
-    color: #555;
+    color: var(--text-dim);
     min-width: 60px;
   }
 
@@ -112,21 +112,23 @@
     width: 100%;
     min-width: 0;
     padding: 0.3rem 0.4rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     font-size: 0.85rem;
     text-align: right;
+    color: var(--text);
+    background: var(--surface-inset);
   }
 
   .unit-input input:focus {
     outline: none;
-    border-color: #4a90d9;
-    box-shadow: 0 0 0 2px #4a90d933;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px rgba(46, 230, 214, 0.25);
   }
 
   .unit {
     font-size: 0.75rem;
-    color: #999;
+    color: var(--muted);
     min-width: 1.2rem;
   }
 </style>

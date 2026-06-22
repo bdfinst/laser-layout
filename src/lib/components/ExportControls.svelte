@@ -182,51 +182,67 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    margin-top: 1rem;
   }
 
   .buttons {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.75rem;
     flex-wrap: wrap;
   }
 
+  /* Glowing "laser-on" primary action. */
   .nest-btn {
     padding: 0.6rem 1.5rem;
-    background: #4a90d9;
-    color: white;
-    border: none;
-    border-radius: 6px;
+    background: linear-gradient(180deg, rgba(46, 230, 214, 0.18), rgba(46, 230, 214, 0.06));
+    color: var(--brand);
+    border: 1px solid var(--brand-dim);
+    border-radius: 7px;
     font-size: 0.95rem;
     font-weight: 600;
+    letter-spacing: 0.01em;
     cursor: pointer;
-    transition: background 0.2s;
+    box-shadow: var(--glow-brand);
+    transition:
+      background 0.2s,
+      box-shadow 0.2s,
+      color 0.2s;
   }
 
   .nest-btn:hover:not(:disabled) {
-    background: #357abd;
+    background: linear-gradient(180deg, rgba(46, 230, 214, 0.3), rgba(46, 230, 214, 0.12));
+    color: #d8fffb;
+    box-shadow:
+      0 0 8px rgba(46, 230, 214, 0.75),
+      0 0 20px rgba(46, 230, 214, 0.35);
   }
 
   .nest-btn:disabled {
-    background: #b0c4de;
+    background: var(--surface-inset);
+    color: var(--muted);
+    border-color: var(--border);
+    box-shadow: none;
     cursor: not-allowed;
   }
 
   .stop-btn {
     padding: 0.6rem 1.25rem;
-    background: #e74c3c;
-    color: white;
-    border: none;
-    border-radius: 6px;
+    background: linear-gradient(180deg, rgba(255, 59, 107, 0.2), rgba(255, 59, 107, 0.07));
+    color: var(--accent);
+    border: 1px solid rgba(255, 59, 107, 0.55);
+    border-radius: 7px;
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.2s;
+    box-shadow: var(--glow-accent);
+    transition:
+      background 0.2s,
+      box-shadow 0.2s;
   }
 
   .stop-btn:hover {
-    background: #c0392b;
+    background: linear-gradient(180deg, rgba(255, 59, 107, 0.32), rgba(255, 59, 107, 0.12));
+    color: #ffd7e1;
   }
 
   .export-group {
@@ -236,26 +252,31 @@
   }
 
   select {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
     font-size: 0.85rem;
-    background: white;
+    color: var(--text);
+    background: var(--surface-inset);
   }
 
   .export-btn {
-    padding: 0.5rem 1rem;
-    background: #2ecc71;
-    color: white;
-    border: none;
-    border-radius: 6px;
+    padding: 0.55rem 1.1rem;
+    background: linear-gradient(180deg, rgba(57, 255, 122, 0.18), rgba(57, 255, 122, 0.06));
+    color: var(--laser);
+    border: 1px solid rgba(57, 255, 122, 0.5);
+    border-radius: 7px;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.2s;
+    box-shadow: var(--glow-laser);
+    transition:
+      background 0.2s,
+      box-shadow 0.2s;
   }
 
   .export-btn:hover {
-    background: #27ae60;
+    background: linear-gradient(180deg, rgba(57, 255, 122, 0.3), rgba(57, 255, 122, 0.1));
+    color: #d8ffe4;
   }
 </style>
