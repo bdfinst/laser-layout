@@ -99,6 +99,44 @@ function sortByDescendingArea(parts: Part[]): Part[] {
   });
 }
 
+function bboxArea(part: Part): number {
+  const bb = boundingBox(part.polygons[0]);
+  return bb.width * bb.height;
+}
+
+/**
+ * Global multi-sheet assignment (#16): partition parts across exactly `k` sheets up front,
+ * instead of greedily filling one sheet and overflowing the rest. Uses the Longest-Processing-
+ * Time heuristic — parts in descending area, each assigned to the currently-lightest bin — so
+ * load is balanced across the `k` sheets rather than front-loaded. Balancing matters because
+ * the per-sheet GA packs a smaller, evener group more reliably than one over-full sheet plus a
+ * sparse remainder, which is how a balanced split can fit a job into fewer sheets than greedy.
+ * Returns `k` part groups (some may be empty when `k` exceeds the part count).
+ */
+export function partitionByArea(parts: Part[], k: number): Part[][] {
+  const bins = Array.from({ length: Math.max(1, k) }, () => ({ parts: [] as Part[], area: 0 }));
+  for (const part of sortByDescendingArea(parts)) {
+    let lightest = 0;
+    for (let i = 1; i < bins.length; i++) {
+      if (bins[i].area < bins[lightest].area) lightest = i;
+    }
+    bins[lightest].parts.push(part);
+    bins[lightest].area += bboxArea(part);
+  }
+  return bins.map((b) => b.parts);
+}
+
+/** Heaviest bin's total bounding-box area in the balanced k-partition — a cheap feasibility bound. */
+function maxBinBboxArea(parts: Part[], k: number): number {
+  let max = 0;
+  for (const group of partitionByArea(parts, k)) {
+    let area = 0;
+    for (const p of group) area += bboxArea(p);
+    if (area > max) max = area;
+  }
+  return max;
+}
+
 export function makeOptimizerConfig(config: NestingConfig): OptimizerConfig {
   return {
     populationSize: config.populationSize,
@@ -337,6 +375,40 @@ export function isOptimalResult(result: NestingResult, floor: number): boolean {
   return result.unplaced.length === 0 && result.sheets.length <= floor;
 }
 
+/**
+ * Global multi-sheet assignment attempt (#16): partition the (already expanded/simplified)
+ * parts into exactly `k` balanced groups and nest each group on its own sheet. Returns the
+ * combined result; any part a group's GA can't place lands in `unplaced`, so the caller can
+ * reject a `k` that didn't fit everything. Unlike the greedy fill-then-overflow path, this
+ * decides which parts share a sheet before nesting, which can pack a near-boundary job into
+ * fewer sheets. Reuses the per-sheet GA, so all placement/kerf/density behavior is identical.
+ */
+export function packIntoKSheets(
+  prepared: Part[],
+  originals: Map<string, Part>,
+  config: NestingConfig,
+  k: number,
+): NestingResult {
+  const optConfig = makeOptimizerConfig(config);
+  const kerf = placementKerf(config);
+  const sheets: SheetResult[] = [];
+  const unplaced: Part[] = [];
+  let sheetIndex = 0;
+
+  for (const group of partitionByArea(prepared, k)) {
+    if (group.length === 0) continue;
+    const placed = optimize(group, config.sheet, kerf, optConfig);
+    if (placed.length > 0) {
+      sheets.push(buildSheetResult(withOriginalGeometry(placed, originals), sheetIndex, config));
+      sheetIndex++;
+    }
+    const placedIds = new Set(placed.map((p) => p.part.id));
+    for (const p of group) if (!placedIds.has(p.id)) unplaced.push(p);
+  }
+
+  return buildNestingResult(sheets, restoreUnplaced(unplaced, originals), config);
+}
+
 export interface MultiStartOptions {
   /** Wall-clock budget across all starts (ms). Defaults to the config's timeBudgetMs or 60s. */
   timeBudgetMs?: number;
@@ -349,6 +421,10 @@ export interface MultiStartOptions {
 // Safety bound on starts so a job that completes near-instantly (and can't reach the floor)
 // can't spin the loop; real jobs are bounded first by the wall-clock budget.
 const MAX_STARTS_DEFAULT = 1000;
+
+// Generation cap for the global-assignment sweep's per-sheet nests (#16). Kept low so the
+// sweep costs a small fraction of a random restart; balanced groups converge well within it.
+const SWEEP_MAX_GENERATIONS = 40;
 
 /**
  * Multi-start nesting as a generator: repeat the whole nest with the RNG advancing between
@@ -370,8 +446,15 @@ export function* nestPartsMultiStartIterative(
   const deadline = now() + budget;
   const floor = sheetLowerBound(input.parts, input.quantities, input.config.sheet);
 
+  // Prepared parts for the global-assignment sweep (#16): same expansion/simplification/order
+  // the greedy path uses, so the two strategies nest comparable geometry.
+  const expanded = expandParts(input.parts, input.quantities);
+  const originals = new Map(expanded.map((p) => [p.id, p]));
+  const prepared = sortByDescendingArea(simplifyPartsForNesting(expanded));
+
   let best: NestingResult | null = null;
   let starts = 0;
+  let triedGlobal = false;
   while (true) {
     const gen = nestPartsIterative(input);
     let iter = gen.next();
@@ -389,6 +472,36 @@ export function* nestPartsMultiStartIterative(
     if (!best || isBetterResult(iter.value, best)) best = iter.value;
     starts++;
     if (isOptimalResult(best, floor)) break;
+
+    // Global multi-sheet assignment sweep (#16): once a greedy best exists that places
+    // everything but uses more than the area floor, try packing into fewer sheets via a
+    // balanced partition. Run once (it's a bounded set of full nests), gated by the deadline,
+    // and adopt only a strictly-better result — so it can cut sheet count but never raise it.
+    if (!triedGlobal && best.unplaced.length === 0 && best.sheets.length > floor) {
+      triedGlobal = true;
+      // Cap the per-attempt generation budget so the sweep is a small fraction of a restart —
+      // balanced groups are smaller/easier and converge fast, and a doomed dense attempt (e.g.
+      // a too-low k) fails cheaply rather than eating the restart budget.
+      const sweepConfig: NestingConfig = { ...input.config, maxGenerations: SWEEP_MAX_GENERATIONS };
+      const sheetArea = input.config.sheet.width * input.config.sheet.height;
+      for (let k = floor; k < best.sheets.length; k++) {
+        if (now() >= deadline) break;
+        // Skip a `k` whose balanced partition forces a bin past the sheet's bbox-area bound:
+        // such a sheet can only fit via interlocking (overlapping bounding boxes), which the
+        // bbox-greedy partition + per-sheet GA can't realize anyway. This keeps the sweep from
+        // burning restart budget on dense interlocking jobs (e.g. lego, bbox ≈ 101% of sheet),
+        // where reducing sheet count is a density problem (#26), not an assignment one.
+        if (maxBinBboxArea(prepared, k) > sheetArea) continue;
+        const candidate = packIntoKSheets(prepared, originals, sweepConfig, k);
+        if (isBetterResult(candidate, best)) {
+          best = candidate;
+          yield { currentSheet: 0, generation: 0, result: best, starts };
+        }
+        if (isOptimalResult(best, floor)) break;
+      }
+      if (isOptimalResult(best, floor)) break;
+    }
+
     if (starts >= maxStarts || now() >= deadline) break;
   }
 

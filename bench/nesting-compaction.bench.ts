@@ -204,6 +204,69 @@ describe('nesting compaction benchmark', () => {
       );
     }
 
+    // Global multi-sheet assignment KPI (#16): a part set tuned just past a sheet boundary.
+    // Full-width parts make this 1D height bin-packing; with kerf=1 the optimal packing is 4
+    // sheets ({60}{52,40}{52}{48,48}), but greedy fill-then-overflow strands them into more.
+    // The multi-start path runs the balanced-partition assignment and should recover 4 — a
+    // strict sheet-count reduction vs the greedy baseline, with every part still placed.
+    {
+      const rect = (id: string, ph: number) => ({
+        id,
+        name: id,
+        polygons: [
+          [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: ph },
+            { x: 0, y: ph },
+          ],
+        ],
+        sourceIndex: 0,
+      });
+      const parts = [60, 52, 52, 48, 48, 40].map((ph, i) => rect(`p${i}`, ph));
+      const quantities = new Map(parts.map((p) => [p.id, 1]));
+      const config: NestingConfig = {
+        sheet: { width: 100, height: 100 },
+        kerf: 1,
+        rotationSteps: 4,
+        populationSize: 20,
+        generations: 30,
+        maxGenerations: 60,
+      };
+      const w = 100;
+      for (const [label, run] of [
+        ['greedy', () => nestParts({ parts, quantities, config })],
+        ['global', () => nestPartsMultiStart({ parts, quantities, config }, { maxStarts: 4 })],
+      ] as const) {
+        const agg = { sheets: 0, placed: 0, unplaced: 0, usedArea: 0, trueFill: 0, ms: 0 };
+        for (const seed of SEEDS) {
+          seedRandom(seed);
+          const t0 = performance.now();
+          const res = run();
+          agg.ms += performance.now() - t0;
+          const r = kpis(res, w);
+          agg.sheets += r.sheets;
+          agg.placed += r.placed;
+          agg.unplaced += r.unplaced;
+          agg.usedArea += r.usedArea;
+          agg.trueFill += r.trueFill;
+        }
+        const n = SEEDS.length;
+        rows.push(
+          [
+            `boundary-bins[${label}]`,
+            `${w}x100`,
+            (agg.sheets / n).toFixed(2),
+            (agg.placed / n).toFixed(1),
+            (agg.unplaced / n).toFixed(1),
+            `${Math.round(agg.usedArea / n)}`,
+            (agg.trueFill / n).toFixed(4),
+            `${Math.round(agg.ms / n)}`,
+          ].join('\t'),
+        );
+      }
+    }
+
     Math.random = orig;
     console.log('\n' + rows.join('\n') + '\n');
   });
