@@ -71,6 +71,7 @@
     --success: #39ff7a;
     --warn: #ffb454;
 
+    --focus-ring: 0 0 0 2px rgba(46, 230, 214, 0.25);
     --glow-brand: 0 0 5px rgba(46, 230, 214, 0.55), 0 0 14px rgba(46, 230, 214, 0.22);
     --glow-accent: 0 0 5px rgba(255, 59, 107, 0.6), 0 0 14px rgba(255, 59, 107, 0.25);
     --glow-laser: 0 0 5px rgba(57, 255, 122, 0.6), 0 0 14px rgba(57, 255, 122, 0.25);

@@ -224,6 +224,6 @@
     max-height: 460px;
     border: 1px solid var(--border-strong);
     border-radius: 4px;
-    background: #0a0f17;
+    background: var(--surface-inset);
   }
 </style>

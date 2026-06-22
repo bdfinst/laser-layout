@@ -58,6 +58,15 @@
     const input = e.target as HTMLInputElement;
     handleFiles(input.files);
   }
+
+  // The drop-zone is a focusable role="button"; mirror native button keys so
+  // keyboard users can open the file dialog with Enter or Space.
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      (document.getElementById('file-input') as HTMLInputElement | null)?.click();
+    }
+  }
 </script>
 
 <div
@@ -67,6 +76,7 @@
   ondrop={onDrop}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
+  onkeydown={onKeyDown}
   role="button"
   tabindex="0"
 >

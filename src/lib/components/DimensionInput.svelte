@@ -123,7 +123,7 @@
   .unit-input input:focus {
     outline: none;
     border-color: var(--brand);
-    box-shadow: 0 0 0 2px rgba(46, 230, 214, 0.25);
+    box-shadow: var(--focus-ring);
   }
 
   .unit {
