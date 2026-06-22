@@ -86,11 +86,14 @@ describe('mergeBest', () => {
 });
 
 describe('desiredWorkerCount', () => {
-  it('uses one worker per core', () => {
-    expect(desiredWorkerCount(4)).toBe(4);
+  it('reserves one core for the main thread', () => {
+    expect(desiredWorkerCount(4)).toBe(3);
+    expect(desiredWorkerCount(8)).toBe(7);
   });
 
-  it('clamps to at least one (degrades to serial)', () => {
+  it('clamps to at least one (degrades to serial on 1–2 cores)', () => {
+    expect(desiredWorkerCount(2)).toBe(1);
+    expect(desiredWorkerCount(1)).toBe(1);
     expect(desiredWorkerCount(0)).toBe(1);
     expect(desiredWorkerCount(undefined)).toBe(1);
   });

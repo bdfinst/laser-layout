@@ -56,15 +56,18 @@ export function mergeBest(a: NestingResult | null, b: NestingResult): NestingRes
 }
 
 /**
- * Resolve how many workers to spawn: one per logical core (the caller passes
- * `navigator.hardwareConcurrency`), clamped to [1, cap] so we neither under-use a multi-core
- * machine nor oversubscribe a many-core one. A value of 1 degrades cleanly to serial behaviour.
+ * Resolve how many workers to spawn: one per logical core *less one reserved for the main
+ * thread*, clamped to [1, cap]. Reserving a core keeps the main thread responsive — it still
+ * has to process progress messages, update the UI, and fire the wall-clock cutoff timer; a
+ * fully-subscribed pool can starve it on a busy/shared machine (e.g. CI), delaying both the
+ * cutoff and the workers' `done` messages and hanging the run well past its budget. A 1–2 core
+ * machine degrades cleanly to a single worker (= serial behaviour).
  */
 export function desiredWorkerCount(hardwareConcurrency: number | undefined, cap = 8): number {
   const cores = Number.isFinite(hardwareConcurrency)
     ? Math.floor(hardwareConcurrency as number)
     : 1;
-  return Math.max(1, Math.min(cap, cores));
+  return Math.max(1, Math.min(cap, cores - 1));
 }
 
 export interface ParallelNestOptions {
