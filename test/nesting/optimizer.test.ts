@@ -5,8 +5,10 @@ import {
   hasStalled,
   fitnessFromStats,
   heuristicOrders,
+  localSearchPolish,
   PENALTY_PER_UNPLACED,
   DEFAULT_OPTIMIZER_CONFIG,
+  type Individual,
 } from '$lib/nesting/optimizer';
 import type { Part } from '$lib/geometry/types';
 
@@ -310,6 +312,74 @@ describe('optimizeIterative convergence', () => {
       count++;
     }
     expect(count).toBe(config.maxGenerations);
+  });
+});
+
+describe('localSearchPolish (memetic, #39)', () => {
+  const angleStep = (2 * Math.PI) / 72;
+
+  function individual(order: number[], rotations?: number[]): Individual {
+    const n = order.length;
+    return {
+      order,
+      rotations: rotations ?? new Array(n).fill(0),
+      mirrors: new Array(n).fill(false),
+      fitness: Infinity,
+      placement: [],
+    };
+  }
+
+  it('hill-climbs adjacent swaps toward a lower-fitness order', () => {
+    // Synthetic fitness: distance of the order permutation from the identity (lower better).
+    // Reachable from [1,0,2] by a single adjacent swap.
+    const evalInd = (ind: Individual): number => {
+      ind.placement = [];
+      return ind.order.reduce((sum, v, i) => sum + Math.abs(v - i), 0);
+    };
+    const start = individual([1, 0, 2]);
+    const out = localSearchPolish(start, evalInd, { angleStep });
+    expect(out.order).toEqual([0, 1, 2]);
+    expect(out.fitness).toBe(0);
+  });
+
+  it('never returns a worse fitness than the input (monotonic)', () => {
+    // Fitness that no neighbour move can improve from the start.
+    const evalInd = (ind: Individual): number => {
+      ind.placement = [];
+      return ind.order[0] === 0 ? 0 : 5; // already optimal at start
+    };
+    const start = individual([0, 1, 2]);
+    start.fitness = evalInd(individual([0, 1, 2]));
+    const out = localSearchPolish(start, evalInd, { angleStep });
+    expect(out.fitness).toBeLessThanOrEqual(start.fitness);
+    expect(out.order).toEqual([0, 1, 2]);
+  });
+
+  it('improves via rotation jitter when a nudged angle scores better', () => {
+    // Reward rotations close to +angleStep on part 0; order is irrelevant.
+    const target = angleStep;
+    const evalInd = (ind: Individual): number => {
+      ind.placement = [];
+      return Math.abs(ind.rotations[0] - target);
+    };
+    const start = individual([0, 1], [0, 0]);
+    const out = localSearchPolish(start, evalInd, { angleStep });
+    expect(out.rotations[0]).toBeCloseTo(target, 9);
+  });
+
+  it('respects maxPasses and terminates', () => {
+    let calls = 0;
+    const evalInd = (ind: Individual): number => {
+      ind.placement = [];
+      calls++;
+      return ind.order.reduce((sum, v, i) => sum + Math.abs(v - i), 0);
+    };
+    const out = localSearchPolish(individual([2, 1, 0]), evalInd, {
+      angleStep,
+      maxPasses: 1,
+    });
+    expect(calls).toBeGreaterThan(0);
+    expect(Number.isFinite(out.fitness)).toBe(true);
   });
 });
 
