@@ -1,7 +1,7 @@
 ---
 id: lightburn-export-material-rect-on-cut-layer
 created: 2026-06-22T13:56:42Z
-status: open
+status: resolved
 ---
 
 # LightBurn export: material rectangle should be on a tool layer, not a cut layer

@@ -10,6 +10,10 @@ export interface LightBurnExportOptions {
 
 const VERSION_RE = /^[\d.]+$/;
 
+// LightBurn tool layers (T1/T2) are non-output guide layers. The material/sheet
+// rectangle uses T1 (CutIndex 30) so it is shown as a boundary but never cut.
+const TOOL_LAYER_INDEX = 30;
+
 export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExportOptions): string {
   const { sheetWidth, sheetHeight, appVersion = '1.0' } = options;
   const safeVersion = VERSION_RE.test(appVersion) ? appVersion : '1.0';
@@ -26,6 +30,12 @@ export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExport
   lines.push('        <priority Value="0"/>');
   lines.push('    </CutSetting>');
 
+  lines.push('    <CutSetting type="Tool">');
+  lines.push(`        <index Value="${TOOL_LAYER_INDEX}"/>`);
+  lines.push('        <name Value="Sheet"/>');
+  lines.push('        <priority Value="1"/>');
+  lines.push('    </CutSetting>');
+
   for (const pp of placed) {
     const polygons = getPlacedPolygons(pp);
     for (const poly of polygons) {
@@ -33,7 +43,9 @@ export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExport
     }
   }
 
-  lines.push(`    <Shape Type="Rect" CutIndex="1" W="${sheetWidth}" H="${sheetHeight}" Cr="0">`);
+  lines.push(
+    `    <Shape Type="Rect" CutIndex="${TOOL_LAYER_INDEX}" W="${sheetWidth}" H="${sheetHeight}" Cr="0">`,
+  );
   lines.push(`        <XForm>1 0 0 1 ${sheetWidth / 2} ${sheetHeight / 2}</XForm>`);
   lines.push('    </Shape>');
 
