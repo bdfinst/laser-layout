@@ -60,9 +60,9 @@
     --border: #1d2a39;
     --border-strong: #2b3d53;
 
-    --text: #e7f1f8;
-    --text-dim: #a6bacb;
-    --muted: #66798d;
+    --text: #eef5fb;
+    --text-dim: #c2d2e0;
+    --muted: #93a6b8;
 
     --brand: #2ee6d6; /* laser cyan */
     --brand-dim: #1ba99d;
