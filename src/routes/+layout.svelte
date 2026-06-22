@@ -17,12 +17,15 @@
     z-index: 1000;
     max-width: 240px;
     padding: 0.4rem 0.6rem;
-    background: #1f2933;
-    color: #fff;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
     font-size: 0.75rem;
     line-height: 1.35;
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+    box-shadow:
+      0 4px 14px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(46, 230, 214, 0.08);
     pointer-events: none;
     white-space: normal;
   }
