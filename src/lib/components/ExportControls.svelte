@@ -4,16 +4,22 @@
   import { exportToSVG } from '$lib/exporters/svg-exporter';
   import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
   import { tooltip } from '$lib/actions/tooltip';
-  import type { WorkerResponse } from '$lib/nesting/nesting-worker';
+  import {
+    runParallelNest,
+    desiredWorkerCount,
+    type CoordinatorHandle,
+    type WorkerLike,
+  } from '$lib/nesting/nesting-coordinator';
+  import { resolveTimeBudget } from '$lib/nesting/engine';
 
   let exportFormat = $state<'svg' | 'lightburn'>('svg');
-  let worker: Worker | null = null;
+  let nest: CoordinatorHandle | null = null;
   let currentRunId = 0;
 
   function teardownWorker() {
-    if (worker) {
-      worker.terminate();
-      worker = null;
+    if (nest) {
+      nest.terminate();
+      nest = null;
     }
   }
 
@@ -25,34 +31,16 @@
     projectStore.setNesting(true);
 
     const runId = ++currentRunId;
+    const isCurrent = () => runId === currentRunId;
 
-    worker = new Worker(new URL('../nesting/nesting-worker.ts', import.meta.url), {
-      type: 'module',
-    });
-
-    worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-      // Ignore stale messages from a previous run
-      if (runId !== currentRunId) return;
-
-      const msg = e.data;
-      if (msg.type === 'progress') {
-        projectStore.updateResult(msg.result, msg.generation, msg.currentSheet);
-      } else if (msg.type === 'done') {
-        projectStore.finishNesting(msg.result);
-        teardownWorker();
-      } else if (msg.type === 'error') {
-        console.error('Nesting worker error:', msg.message);
-        projectStore.setNesting(false);
-        teardownWorker();
-      }
-    };
-
-    worker.onerror = (e) => {
-      if (runId !== currentRunId) return;
-      console.error('Nesting worker error:', e);
-      projectStore.setNesting(false);
-      teardownWorker();
-    };
+    // Parallel multi-start (#42): one worker per logical core, each running an independent
+    // search; the coordinator keeps the global best. More starts per time budget, never worse
+    // than serial. A single-core machine falls back to one worker (= serial behaviour).
+    const workerCount = desiredWorkerCount(navigator.hardwareConcurrency);
+    const factory = (): WorkerLike =>
+      new Worker(new URL('../nesting/nesting-worker.ts', import.meta.url), {
+        type: 'module',
+      }) as unknown as WorkerLike;
 
     // Deep-clone to strip Svelte $state proxies (not structured-cloneable)
     const serializedInput = JSON.parse(
@@ -63,11 +51,35 @@
       }),
     );
 
-    worker.postMessage({ type: 'start', input: serializedInput });
+    nest = runParallelNest(
+      serializedInput,
+      workerCount,
+      factory,
+      {
+        onProgress: (currentSheet, generation, result) => {
+          if (!isCurrent()) return;
+          projectStore.updateResult(result, generation, currentSheet);
+        },
+        onDone: (result) => {
+          if (!isCurrent()) return;
+          projectStore.finishNesting(result);
+          teardownWorker();
+        },
+        onError: (message) => {
+          if (!isCurrent()) return;
+          console.error('Nesting worker error:', message);
+          projectStore.setNesting(false);
+          teardownWorker();
+        },
+      },
+      // Cap total wall-clock at the configured budget (+grace) so a straggler worker stuck in a
+      // slow exact/NFP generation can't hang the run past the budget (#42).
+      { timeBudgetMs: resolveTimeBudget(config) },
+    );
   }
 
   function stopNest() {
-    // Halt the worker and keep the best layout found so far (the latest progress result is
+    // Halt the workers and keep the best layout found so far (the latest progress result is
     // already in the store). Bumping the run id discards any in-flight worker message.
     currentRunId++;
     teardownWorker();

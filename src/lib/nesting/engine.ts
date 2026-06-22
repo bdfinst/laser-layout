@@ -27,6 +27,8 @@ export interface NestingProgress {
   currentSheet: number;
   generation: number;
   result: NestingResult;
+  /** Multi-start only: number of complete starts finished so far (#42). 0 for a single nest. */
+  starts?: number;
 }
 
 /** A part is required unless it explicitly opts into the "optional" quantity priority (#43). */
@@ -367,6 +369,7 @@ export function* nestPartsMultiStartIterative(
         currentSheet: prog.currentSheet,
         generation: prog.generation,
         result: best ?? prog.result,
+        starts,
       };
       iter = gen.next();
     }
