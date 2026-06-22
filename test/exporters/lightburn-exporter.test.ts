@@ -109,6 +109,39 @@ describe('exportToLightBurn', () => {
     expect(getVerts(rotated)).not.toBe(getVerts(unrotated));
   });
 
+  it('defines a tool-layer CutSetting for the material rectangle', () => {
+    const xml = exportToLightBurn([], { sheetWidth: 100, sheetHeight: 100 });
+    expect(xml).toMatch(
+      /<CutSetting type="Tool">[\s\S]*?<index Value="30"\/>[\s\S]*?<\/CutSetting>/,
+    );
+  });
+
+  it('puts the material rectangle on the tool layer, not layer 01', () => {
+    const xml = exportToLightBurn([], { sheetWidth: 200, sheetHeight: 150 });
+    expect(xml).toContain('Type="Rect" CutIndex="30"');
+    expect(xml).not.toContain('Type="Rect" CutIndex="1"');
+  });
+
+  it('only references layers that have a matching CutSetting', () => {
+    const xml = exportToLightBurn([makePlaced('a', 10, 10, 0, 0)], {
+      sheetWidth: 100,
+      sheetHeight: 100,
+    });
+    const definedIndexes = new Set([...xml.matchAll(/<index Value="(\d+)"\/>/g)].map((m) => m[1]));
+    const usedIndexes = [...xml.matchAll(/CutIndex="(\d+)"/g)].map((m) => m[1]);
+    for (const idx of usedIndexes) {
+      expect(definedIndexes.has(idx)).toBe(true);
+    }
+  });
+
+  it('keeps part shapes on the cut layer (00)', () => {
+    const xml = exportToLightBurn([makePlaced('a', 10, 10, 0, 0)], {
+      sheetWidth: 100,
+      sheetHeight: 100,
+    });
+    expect(xml).toContain('Type="Path" CutIndex="0"');
+  });
+
   it('skips degenerate 2-point polygons', () => {
     const part: Part = {
       id: 'a',
