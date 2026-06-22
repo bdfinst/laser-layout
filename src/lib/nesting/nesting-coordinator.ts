@@ -39,6 +39,13 @@ export interface CoordinatorHandle {
 }
 
 /**
+ * Grace added to the time budget before the coordinator force-finishes (#42). Workers self-stop
+ * at the budget on their own GA-generation boundaries; this small margin lets a normal run report
+ * `done` first and only cuts off a genuine straggler (one stuck mid exact/NFP generation).
+ */
+export const COORDINATOR_GRACE_MS = 2000;
+
+/**
  * Pick the strictly-better of two results (keeping `a` on ties) using the engine's policy.
  * Exposed so the aggregation invariant — the merged result is never worse than any input — is
  * directly unit-testable.
@@ -60,6 +67,19 @@ export function desiredWorkerCount(hardwareConcurrency: number | undefined, cap 
   return Math.max(1, Math.min(cap, cores));
 }
 
+export interface ParallelNestOptions {
+  /**
+   * Global wall-clock cutoff (ms). Each worker also self-enforces this budget, but the slowest of
+   * N workers gates completion and a single slow exact/NFP generation can overrun the boundary, so
+   * the coordinator caps total wall-clock at `timeBudgetMs + COORDINATOR_GRACE_MS`, delivering the
+   * best layout found so far and terminating any straggler. Omit to wait for every worker (tests).
+   */
+  timeBudgetMs?: number;
+  /** Injectable timer for tests (defaults to setTimeout/clearTimeout). */
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+}
+
 /**
  * Spawn `count` workers, post the same serialized input to each, and aggregate their results.
  * Returns immediately with a handle whose `terminate()` stops the pool; results are delivered
@@ -70,19 +90,42 @@ export function runParallelNest(
   count: number,
   factory: WorkerFactory,
   handlers: CoordinatorHandlers,
+  options: ParallelNestOptions = {},
 ): CoordinatorHandle {
+  const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = options.clearTimer ?? ((h) => clearTimeout(h));
+
   const workers: WorkerLike[] = [];
   let best: NestingResult | null = null;
   let finished = 0;
   let totalStarts = 0;
   let stopped = false;
+  let done = false;
+  // Set once the cutoff fires before any layout exists: finish the instant the first result lands.
+  let forceFinish = false;
   let lastError = 'Nesting failed';
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearCutoff = (): void => {
+    if (timer != null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+
+  // Deliver the aggregate result exactly once and stop every worker (including stragglers).
+  const finalize = (): void => {
+    if (done) return;
+    done = true;
+    clearCutoff();
+    for (const worker of workers) worker.terminate();
+    if (best) handlers.onDone(best, totalStarts);
+    else handlers.onError(lastError);
+  };
 
   const finishOne = (): void => {
     finished++;
-    if (finished < count) return;
-    if (best) handlers.onDone(best, totalStarts);
-    else handlers.onError(lastError);
+    if (finished >= count) finalize();
   };
 
   for (let i = 0; i < count; i++) {
@@ -90,14 +133,22 @@ export function runParallelNest(
     workers.push(worker);
 
     worker.onmessage = (event) => {
-      if (stopped) return;
+      if (stopped || done) return;
       const msg = event.data;
       if (msg.type === 'progress') {
         best = mergeBest(best, msg.result);
+        if (forceFinish) {
+          finalize();
+          return;
+        }
         handlers.onProgress(msg.currentSheet, msg.generation, best);
       } else if (msg.type === 'done') {
         best = mergeBest(best, msg.result);
         totalStarts += msg.starts;
+        if (forceFinish) {
+          finalize();
+          return;
+        }
         finishOne();
       } else if (msg.type === 'error') {
         // A failed worker still lets the pool succeed on the others' results.
@@ -107,7 +158,7 @@ export function runParallelNest(
     };
 
     worker.onerror = (event) => {
-      if (stopped) return;
+      if (stopped || done) return;
       lastError = event instanceof Error ? event.message : 'Nesting worker error';
       finishOne();
     };
@@ -115,9 +166,21 @@ export function runParallelNest(
     worker.postMessage({ type: 'start', input: serializedInput });
   }
 
+  if (options.timeBudgetMs != null && options.timeBudgetMs >= 0) {
+    timer = setTimer(() => {
+      timer = null;
+      // Best-so-far already exists (the fast GA phase reports it within a generation or two): cut
+      // off stragglers now. Otherwise arm forceFinish so the first result to arrive finalizes.
+      if (best) finalize();
+      else forceFinish = true;
+    }, options.timeBudgetMs + COORDINATOR_GRACE_MS);
+  }
+
   return {
     terminate(): void {
       stopped = true;
+      done = true;
+      clearCutoff();
       for (const worker of workers) worker.terminate();
     },
   };

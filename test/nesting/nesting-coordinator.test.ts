@@ -216,6 +216,94 @@ describe('runParallelNest', () => {
     expect(errorMsg).toBe('second');
   });
 
+  it('force-finishes at the time budget with best-so-far and terminates stragglers', () => {
+    const workers: ReturnType<typeof fakeWorker>[] = [];
+    const factory = () => {
+      const w = fakeWorker();
+      workers.push(w);
+      return w;
+    };
+    let fire: (() => void) | null = null;
+    let done: { result: NestingResult; totalStarts: number } | null = null;
+    let doneCount = 0;
+
+    runParallelNest(
+      {},
+      2,
+      factory,
+      {
+        ...noopHandlers,
+        onDone: (result, totalStarts) => {
+          doneCount++;
+          done = { result, totalStarts };
+        },
+      },
+      {
+        timeBudgetMs: 100,
+        setTimer: (fn) => {
+          fire = fn;
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimer: () => {},
+      },
+    );
+
+    // One worker reports a best layout; the other is a straggler that never finishes.
+    workers[0].emit({
+      type: 'progress',
+      currentSheet: 0,
+      generation: 1,
+      result: result(0, 1),
+      starts: 2,
+    });
+    expect(done).toBeNull();
+
+    // Budget elapses → cut off now with the best so far, even though worker 1 never finished.
+    fire!();
+    expect(done).not.toBeNull();
+    expect(done!.result.sheets).toHaveLength(1);
+    expect(workers.every((w) => w.terminated)).toBe(true);
+
+    // A late straggler message after the cutoff must not double-finalize.
+    workers[1].emit({ type: 'done', result: result(0, 1), starts: 9 });
+    expect(doneCount).toBe(1);
+  });
+
+  it('after the cutoff with no result yet, finalizes on the first layout to arrive', () => {
+    const workers: ReturnType<typeof fakeWorker>[] = [];
+    const factory = () => {
+      const w = fakeWorker();
+      workers.push(w);
+      return w;
+    };
+    let fire: (() => void) | null = null;
+    let done: NestingResult | null = null;
+
+    runParallelNest(
+      {},
+      2,
+      factory,
+      { ...noopHandlers, onDone: (r) => (done = r) },
+      {
+        timeBudgetMs: 100,
+        setTimer: (fn) => {
+          fire = fn;
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        },
+        clearTimer: () => {},
+      },
+    );
+
+    // Budget elapses before any worker has produced a layout.
+    fire!();
+    expect(done).toBeNull();
+
+    // The first result to arrive finalizes the run immediately.
+    workers[0].emit({ type: 'done', result: result(0, 2), starts: 1 });
+    expect(done).not.toBeNull();
+    expect(done!.sheets).toHaveLength(2);
+  });
+
   it('terminate() stops every worker and silences further messages', () => {
     const workers: ReturnType<typeof fakeWorker>[] = [];
     const factory = () => {

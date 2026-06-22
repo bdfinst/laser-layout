@@ -10,6 +10,7 @@
     type CoordinatorHandle,
     type WorkerLike,
   } from '$lib/nesting/nesting-coordinator';
+  import { resolveTimeBudget } from '$lib/nesting/engine';
 
   let exportFormat = $state<'svg' | 'lightburn'>('svg');
   let nest: CoordinatorHandle | null = null;
@@ -50,23 +51,31 @@
       }),
     );
 
-    nest = runParallelNest(serializedInput, workerCount, factory, {
-      onProgress: (currentSheet, generation, result) => {
-        if (!isCurrent()) return;
-        projectStore.updateResult(result, generation, currentSheet);
+    nest = runParallelNest(
+      serializedInput,
+      workerCount,
+      factory,
+      {
+        onProgress: (currentSheet, generation, result) => {
+          if (!isCurrent()) return;
+          projectStore.updateResult(result, generation, currentSheet);
+        },
+        onDone: (result) => {
+          if (!isCurrent()) return;
+          projectStore.finishNesting(result);
+          teardownWorker();
+        },
+        onError: (message) => {
+          if (!isCurrent()) return;
+          console.error('Nesting worker error:', message);
+          projectStore.setNesting(false);
+          teardownWorker();
+        },
       },
-      onDone: (result) => {
-        if (!isCurrent()) return;
-        projectStore.finishNesting(result);
-        teardownWorker();
-      },
-      onError: (message) => {
-        if (!isCurrent()) return;
-        console.error('Nesting worker error:', message);
-        projectStore.setNesting(false);
-        teardownWorker();
-      },
-    });
+      // Cap total wall-clock at the configured budget (+grace) so a straggler worker stuck in a
+      // slow exact/NFP generation can't hang the run past the budget (#42).
+      { timeBudgetMs: resolveTimeBudget(config) },
+    );
   }
 
   function stopNest() {
