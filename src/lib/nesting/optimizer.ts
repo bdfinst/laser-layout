@@ -108,6 +108,102 @@ export interface Individual {
   placement: PlacedPart[]; // cached result of the last evaluate() — reused for progress/return
 }
 
+function cloneIndividual(ind: Individual): Individual {
+  return {
+    rotations: [...ind.rotations],
+    order: [...ind.order],
+    mirrors: [...ind.mirrors],
+    fitness: ind.fitness,
+    placement: ind.placement,
+  };
+}
+
+export interface PolishOptions {
+  angleStep: number; // one rotation grid step in radians (jitter magnitude)
+  maxPasses?: number; // safety cap on improvement sweeps (default 4)
+  maxEvaluations?: number; // hard budget on candidate evaluations (default Infinity)
+}
+
+/**
+ * Memetic local-search polish (#39). A deterministic hill-climb that squeezes the last
+ * few percent out of the GA's best individual after it has converged. Each pass tries
+ * two cheap neighbourhoods — every adjacent placement-order swap, then a ±1-step rotation
+ * nudge on each part — and keeps a move only when `evaluateInd` reports a strictly lower
+ * fitness. Because it never accepts a worse (or unplacing) move, the returned individual's
+ * fitness is always ≤ the input's, so it can only improve or preserve density/feasibility.
+ *
+ * Uses no RNG, so it neither perturbs the GA's random stream nor changes existing
+ * baselines — the GA runs identically and this only refines its final result. Stops as
+ * soon as a full pass yields no improvement, or after `maxPasses`.
+ *
+ * `evaluateInd` must both score the individual and cache its `.placement` (the optimizer's
+ * `evaluate` does), so the accepted individual carries the placement matching its genes.
+ */
+export function localSearchPolish(
+  best: Individual,
+  evaluateInd: (ind: Individual) => number,
+  options: PolishOptions,
+): Individual {
+  const n = best.order.length;
+  const maxPasses = options.maxPasses ?? 4;
+  const maxEvaluations = options.maxEvaluations ?? Infinity;
+  let evaluations = 0;
+  let current = cloneIndividual(best);
+  if (!Number.isFinite(current.fitness)) {
+    current.fitness = evaluateInd(current);
+    evaluations++;
+  }
+
+  // Returns 'improved' | 'kept' | 'budget' so the caller can stop the moment the
+  // evaluation budget is spent. The budget bounds polish cost in NFP mode, where each
+  // exact evaluation is ~35x the bbox cost.
+  const tryMove = (mutateCandidate: (c: Individual) => void): 'improved' | 'kept' | 'budget' => {
+    if (evaluations >= maxEvaluations) return 'budget';
+    const candidate = cloneIndividual(current);
+    mutateCandidate(candidate);
+    const f = evaluateInd(candidate);
+    evaluations++;
+    if (f < current.fitness) {
+      candidate.fitness = f; // evaluateInd cached candidate.placement
+      current = candidate;
+      return 'improved';
+    }
+    return 'kept';
+  };
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let improved = false;
+    let outOfBudget = false;
+
+    // Neighbourhood 1: adjacent order swaps (cheap reordering of placement sequence).
+    for (let i = 0; i + 1 < n && !outOfBudget; i++) {
+      const r = tryMove((c) => {
+        [c.order[i], c.order[i + 1]] = [c.order[i + 1], c.order[i]];
+      });
+      if (r === 'budget') outOfBudget = true;
+      else if (r === 'improved') improved = true;
+    }
+
+    // Neighbourhood 2: small rotation jitter (±1 grid step) per part. Grain/lock clamps
+    // are applied at consumption (toOrderedParts), so constrained parts stay legal.
+    for (let i = 0; i < n && !outOfBudget; i++) {
+      for (const delta of [options.angleStep, -options.angleStep]) {
+        const r = tryMove((c) => {
+          c.rotations[i] += delta;
+        });
+        if (r === 'budget') {
+          outOfBudget = true;
+          break;
+        } else if (r === 'improved') improved = true;
+      }
+    }
+
+    if (outOfBudget || !improved) break;
+  }
+
+  return current;
+}
+
 /**
  * Snap an arbitrary rotation to the nearest grain-allowed angle (0° or 180°). Grain /
  * directional materials may only be cut along the grain, so cross-grain rotations (90°,
@@ -278,7 +374,18 @@ export function* optimizeIterative(
   }
 
   // population[0] was scored with exact collision; its cached placement is the tight result.
-  return population[0].placement;
+  // Memetic polish (#39): a deterministic hill-climb refines that champion with exact
+  // collision before returning. It only accepts strict improvements, so the result is never
+  // worse than the GA's best.
+  // Keep polish cheap in NFP mode (each exact evaluation is ~35x the bbox cost) and let it
+  // run more freely on the default true-shape path. Always bounded so it can't balloon.
+  const polishBudget = config.useNfpPlacement ? 12 : 150;
+  const polished = localSearchPolish(
+    population[0],
+    (ind) => evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw),
+    { angleStep, maxEvaluations: polishBudget },
+  );
+  return polished.placement;
 }
 
 /**
