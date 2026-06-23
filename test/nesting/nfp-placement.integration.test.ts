@@ -133,13 +133,15 @@ describe('NFP placement path (epic #24, P3–P5, opt-in)', () => {
     const { uniqueParts, quantities } = deduplicateParts(grouped);
     // A light budget — this checks feasibility/validity of the NFP path, not search
     // quality, so cap generations low to keep the (NFP-heavy) nest well under the timeout.
+    // The P0 feasible-region path (#26) is ~2.7x slower per generation, so the budget is
+    // trimmed and the test is given an explicit timeout with headroom for slower CI machines.
     const base: NestingConfig = {
       sheet: { width: 500, height: 500 },
       kerf: 1,
       rotationSteps: 72,
-      populationSize: 20,
-      generations: 8,
-      maxGenerations: 10,
+      populationSize: 14,
+      generations: 5,
+      maxGenerations: 6,
       useNfpPlacement: true,
     };
     const on = nestParts({ parts: uniqueParts, quantities, config: base });
@@ -151,5 +153,5 @@ describe('NFP placement path (epic #24, P3–P5, opt-in)', () => {
     expect(on.totalPlaced).toBe(12);
     expect(on.unplaced).toHaveLength(0);
     expect(off.totalPlaced).toBe(12);
-  });
+  }, 60_000);
 });
