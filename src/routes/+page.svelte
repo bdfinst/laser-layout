@@ -181,7 +181,10 @@
     display: grid;
     grid-template-columns: 340px 1fr;
     gap: 1.5rem;
-    align-items: start;
+    /* Equal-height columns: the preview pane lines up with the bottom of the settings
+       column instead of running taller. Both share the viewport-bound height below; the
+       taller content defines it and the other stretches to match. */
+    align-items: stretch;
   }
 
   .sidebar {
@@ -223,7 +226,13 @@
   }
 
   .preview {
+    /* Match the settings column: same sticky viewport cap, scroll internally so multiple
+       sheets never push the pane taller than the sidebar. */
+    position: sticky;
+    top: 5.5rem;
     min-height: 400px;
+    max-height: calc(100vh - 6.5rem);
+    overflow-y: auto;
   }
 
   @media (max-width: 860px) {
@@ -231,7 +240,8 @@
       grid-template-columns: 1fr;
     }
 
-    .sidebar {
+    .sidebar,
+    .preview {
       position: static;
       max-height: none;
       overflow: visible;
