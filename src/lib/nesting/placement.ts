@@ -17,6 +17,7 @@ import {
 } from './nfp';
 import type { NfpCache } from './nfp-cache';
 import { recordBudgetOutcome } from './instrumentation';
+import { feasibleVertices, type IfpRect } from './nfp-feasible';
 
 interface CachedPlacement {
   pp: PlacedPart;
@@ -657,6 +658,15 @@ function tryAdjacentPositions(
   const bl = (x: number, y: number) => y * sheet.width + x;
   const union = nfpCtx ? placedUnionBB(cache.items) : null;
   const positions: { x: number; y: number }[] = [];
+
+  // NFP-union feasible-region path (P0, #26). Instead of enumerating per-pair anchors — which
+  // can only ever propose vertices of an *individual* NFP — build the exact feasible region
+  // (IFP_rect − dilate(union(NFP_i), kerf)) and take its vertices. Those include the two-contact
+  // interlocking seats that are vertices of the union but of no single NFP, which the anchor
+  // enumeration provably cannot generate. Candidates are exact touching/kerf seats, so this path
+  // also skips the bottom-left slide. Falls back to the legacy anchors if the union degenerates
+  // to an empty feasible region (robustness guardrail, matching the rest of the epic).
+  // Legacy anchor enumeration: bbox corners + interior-gap + concavity + per-pair NFP anchors.
   for (const cp of cache.items) {
     for (const pos of candidateAnchors(cp, partBB, kerf)) positions.push(pos);
     // Concavity anchors only matter under exact collision (bbox approximation rejects
@@ -668,6 +678,27 @@ function tryAdjacentPositions(
         for (const pos of nfpCandidateAnchors(nfp, cp.bb.minX, cp.bb.minY, kerf))
           positions.push(pos);
     }
+  }
+
+  // NFP-union feasible-region path (P0, #26): AUGMENT the anchors with the vertices of the exact
+  // feasible region (IFP_rect − dilate(union(NFP_i), kerf)). Those include the two-contact
+  // interlocking seats that are vertices of the union but of no single NFP, which the per-pair
+  // anchor enumeration provably cannot generate. Superset of candidates ⇒ density can only
+  // improve under the same scoring; the slide still runs to settle them.
+  if (nfpCtx) {
+    const forbidden: Polygon[] = [];
+    for (const cp of cache.items) {
+      const nfp = nfpFor(nfpCtx, cp);
+      // The locus of moving-part reference positions that touch cp is NFP + cp's world origin.
+      if (nfp) forbidden.push(translatePolygon(nfp, cp.bb.minX, cp.bb.minY));
+    }
+    const ifp: IfpRect = {
+      x0: 0,
+      y0: 0,
+      x1: sheet.width - partBB.width,
+      y1: sheet.height - partBB.height,
+    };
+    for (const v of feasibleVertices(forbidden, ifp, kerf)) positions.push(v);
   }
 
   // Keep only in-sheet positions. Without NFP, prefer the lowest (bottom-left) — exactly

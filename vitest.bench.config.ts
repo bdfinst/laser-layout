@@ -8,7 +8,9 @@ export default defineConfig({
   test: {
     include: ['bench/**/*.bench.ts'],
     environment: 'jsdom', // lightburn parser uses DOMParser
-    testTimeout: 600000,
+    // The NFP feasible-region path (#26) is ~2.7x slower per nest, so the NFP-heavy rows push
+    // the full benchmark to ~17 min; allow generous headroom (it is a manual dev tool, not CI).
+    testTimeout: 1_500_000,
     // The benchmark prints a table to stdout; let console output through the default reporter.
     silent: false,
     disableConsoleIntercept: true,
