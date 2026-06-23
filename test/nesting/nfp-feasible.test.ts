@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { feasibleVertices, type IfpRect } from '$lib/nesting/nfp-feasible';
+import { feasibleVertices, type IfpRect, type ForbiddenNfp } from '$lib/nesting/nfp-feasible';
 import type { Point, Polygon } from '$lib/geometry/types';
 import { pointInPolygon } from '$lib/nesting/nfp';
 
@@ -14,13 +14,25 @@ function square(x: number, y: number, w: number, h: number): Polygon {
   ];
 }
 
+// Wrap world-coordinate forbidden polygons as ForbiddenNfp (offset 0, unique key) and run
+// against a fresh per-call dilation cache. Mirrors how placement.ts calls feasibleVertices.
+function fv(polys: Polygon[], ifp: IfpRect, kerf: number): Point[] {
+  const forbidden: ForbiddenNfp[] = polys.map((nfp, i) => ({
+    nfp,
+    offx: 0,
+    offy: 0,
+    key: `k${i}`,
+  }));
+  return feasibleVertices(forbidden, ifp, kerf, new Map());
+}
+
 function has(verts: Point[], x: number, y: number, tol = 0.5): boolean {
   return verts.some((v) => Math.abs(v.x - x) < tol && Math.abs(v.y - y) < tol);
 }
 
 describe('feasibleVertices', () => {
   it('returns the IFP rectangle corners when nothing is forbidden', () => {
-    const v = feasibleVertices([], IFP, 0);
+    const v = fv([], IFP, 0);
     expect(v).toHaveLength(4);
     expect(has(v, 0, 0)).toBe(true);
     expect(has(v, 200, 0)).toBe(true);
@@ -29,7 +41,7 @@ describe('feasibleVertices', () => {
   });
 
   it('returns the corners of a single forbidden square as touching seats', () => {
-    const v = feasibleVertices([square(50, 50, 60, 60)], IFP, 0);
+    const v = fv([square(50, 50, 60, 60)], IFP, 0);
     // The four corners of the forbidden region are exact touching positions.
     expect(has(v, 50, 50)).toBe(true);
     expect(has(v, 110, 50)).toBe(true);
@@ -42,13 +54,13 @@ describe('feasibleVertices', () => {
     // vertices of NEITHER square alone — the interlocking seats the anchor path cannot make.
     const A = square(50, 50, 60, 60); // 50..110
     const B = square(90, 90, 60, 60); // 90..150
-    const v = feasibleVertices([A, B], IFP, 0);
+    const v = fv([A, B], IFP, 0);
     expect(has(v, 110, 90)).toBe(true);
     expect(has(v, 90, 110)).toBe(true);
   });
 
   it('pushes candidates kerf away from the forbidden region', () => {
-    const v = feasibleVertices([square(50, 50, 60, 60)], IFP, 2);
+    const v = fv([square(50, 50, 60, 60)], IFP, 2);
     // With kerf 2 the left clearance edge sits at x = 48 (50 − kerf), not 50.
     expect(v.some((p) => Math.abs(p.x - 48) < 0.6)).toBe(true);
     // And the bottom clearance edge at y = 48.
@@ -58,13 +70,13 @@ describe('feasibleVertices', () => {
 
   it('returns no candidates when the forbidden region fills the IFP', () => {
     // A forbidden square covering the whole inner-fit rectangle leaves nowhere to seat.
-    const v = feasibleVertices([square(-10, -10, 220, 220)], IFP, 0);
+    const v = fv([square(-10, -10, 220, 220)], IFP, 0);
     expect(v).toHaveLength(0);
   });
 
   it('keeps every candidate inside the IFP and outside the forbidden interior', () => {
     const forbidden = [square(40, 40, 50, 50), square(120, 30, 40, 90)];
-    const v = feasibleVertices(forbidden, IFP, 0);
+    const v = fv(forbidden, IFP, 0);
     expect(v.length).toBeGreaterThan(0);
     for (const p of v) {
       expect(p.x).toBeGreaterThanOrEqual(-0.01);
