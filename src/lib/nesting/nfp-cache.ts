@@ -40,6 +40,15 @@ export interface NfpCache {
    */
   get(key: NfpCacheKey, a: Polygon, b: Polygon): Polygon | null;
   has(key: NfpCacheKey): boolean;
+  /**
+   * Per-pair side cache for the kerf-dilated NFP used by the feasible-region placement path
+   * (#26). The dilation depends only on the shape pair and the (per-nest constant) kerf, so it
+   * is translation-invariant and amortizes across every placement and GA generation — the
+   * expensive InflatePaths + simplify runs once per pair, not once per placement. Values are
+   * clipper `Paths64` at the pair's local origin; the placement layer owns the clipper types,
+   * so this is typed loosely to keep the cache clipper-agnostic.
+   */
+  readonly dilated: Map<string, unknown>;
   clear(): void;
 }
 
@@ -50,10 +59,12 @@ export function createNfpCache(
   compute: (a: Polygon, b: Polygon) => Polygon | null = orbitingNFP,
 ): NfpCache {
   const map = new Map<string, Polygon | null>();
+  const dilated = new Map<string, unknown>();
   let hits = 0;
   let misses = 0;
 
   return {
+    dilated,
     get size() {
       return map.size;
     },
@@ -85,6 +96,7 @@ export function createNfpCache(
     },
     clear() {
       map.clear();
+      dilated.clear();
       hits = 0;
       misses = 0;
     },

@@ -17,7 +17,7 @@ import {
 } from './nfp';
 import type { NfpCache } from './nfp-cache';
 import { recordBudgetOutcome } from './instrumentation';
-import { feasibleVertices, type IfpRect } from './nfp-feasible';
+import { feasibleVertices, type IfpRect, type ForbiddenNfp } from './nfp-feasible';
 
 interface CachedPlacement {
   pp: PlacedPart;
@@ -686,11 +686,19 @@ function tryAdjacentPositions(
   // anchor enumeration provably cannot generate. Superset of candidates ⇒ density can only
   // improve under the same scoring; the slide still runs to settle them.
   if (nfpCtx) {
-    const forbidden: Polygon[] = [];
+    const forbidden: ForbiddenNfp[] = [];
     for (const cp of cache.items) {
       const nfp = nfpFor(nfpCtx, cp);
       // The locus of moving-part reference positions that touch cp is NFP + cp's world origin.
-      if (nfp) forbidden.push(translatePolygon(nfp, cp.bb.minX, cp.bb.minY));
+      // The kerf dilation is cached per pair (key = placed-sig | moving-sig) — translation
+      // happens inside feasibleVertices, so the dilated path amortizes across placements.
+      if (nfp)
+        forbidden.push({
+          nfp,
+          offx: cp.bb.minX,
+          offy: cp.bb.minY,
+          key: cp.sig + '|' + nfpCtx.movingSig,
+        });
     }
     const ifp: IfpRect = {
       x0: 0,
@@ -698,7 +706,7 @@ function tryAdjacentPositions(
       x1: sheet.width - partBB.width,
       y1: sheet.height - partBB.height,
     };
-    for (const v of feasibleVertices(forbidden, ifp, kerf)) positions.push(v);
+    for (const v of feasibleVertices(forbidden, ifp, kerf, nfpCtx.cache.dilated)) positions.push(v);
   }
 
   // Keep only in-sheet positions. Without NFP, prefer the lowest (bottom-left) — exactly

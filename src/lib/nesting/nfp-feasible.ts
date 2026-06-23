@@ -12,14 +12,21 @@ import { Clipper, FillRule, JoinType, EndType, type Path64, type Paths64 } from 
  * created). This module builds the exact feasible region for the moving part's reference
  * point and returns its vertices, every one an exact touching/kerf-clearance seat:
  *
- *   forbidden = union( NFP_i translated to world for each placed part i )
- *   feasible  = IFP_rect  −  dilate(forbidden, kerf)
+ *   feasible   = IFP_rect  −  union( dilate(NFP_i, kerf) translated to world )
  *   candidates = vertices(feasible)
  *
  * The IFP (inner-fit polygon) of a rectangular sheet is, for a part normalized to its
  * bbox-min, exactly the axis-aligned rectangle [0, W−w] × [0, H−h] — so no polygon IFP is
- * needed. Kerf is a uniform outward dilation of the forbidden region by a round (disk) join,
- * i.e. an exact Minkowski-with-a-disk clearance.
+ * needed. Kerf is a uniform outward dilation of each NFP by a round (disk) join, i.e. an exact
+ * Minkowski-with-a-disk clearance.
+ *
+ * **Per-pair dilation cache (perf).** Dilation distributes over union — `dilate(∪ NFP_i) =
+ * ∪ dilate(NFP_i)` — and each `dilate(NFP_i, kerf)` depends only on the shape pair and the
+ * (per-nest constant) kerf, so it is translation-invariant. We dilate+simplify each pair-NFP
+ * once into clipper space and cache it; per placement we only translate the cached paths
+ * (integer adds) and run a *single* `Difference` (clipper unions the clip paths internally).
+ * That replaces the old per-placement union + inflate + simplify + difference (4 clipper
+ * passes) with 1, and moves the expensive InflatePaths/simplify off the hot path.
  *
  * Robustness comes from clipper2 (integer boolean ops); inputs are quantized to SCALE.
  */
@@ -43,7 +50,7 @@ function toClipperPath(poly: Polygon): Path64 {
   return Clipper.makePath(flat);
 }
 
-/** Clipper expands outward only when a ring is positively oriented; normalize before union/inflate. */
+/** Clipper expands outward only when a ring is positively oriented; normalize before inflate/union. */
 function orientPositive(path: Path64): Path64 {
   return Clipper.isPositive(path) ? path : Clipper.reversePath(path);
 }
@@ -55,14 +62,61 @@ export interface IfpRect {
   y1: number;
 }
 
+/** A placed part's NFP against the moving part, with its world offset and a per-pair cache key. */
+export interface ForbiddenNfp {
+  /** The pair-NFP in the placed part's local frame (locus of moving reference offsets). */
+  nfp: Polygon;
+  /** World origin of the placed part — the NFP is translated by this to reach sheet coords. */
+  offx: number;
+  offy: number;
+  /** Stable per-pair key (placed-sig | moving-sig); the dilation is cached under it. */
+  key: string;
+}
+
+/**
+ * The kerf-dilated NFP for one pair, in clipper space at the pair's local origin. Cached in the
+ * per-nest `dilatedCache` so the InflatePaths + simplify runs once per pair, not per placement.
+ */
+function dilatedPaths(
+  dilatedCache: Map<string, unknown>,
+  key: string,
+  nfp: Polygon,
+  kerf: number,
+): Paths64 {
+  const cached = dilatedCache.get(key);
+  if (cached !== undefined) return cached as Paths64;
+
+  const base = orientPositive(toClipperPath(nfp));
+  let paths: Paths64;
+  if (kerf > 0) {
+    const inflated = Clipper.InflatePaths([base], kerf * SCALE, JoinType.Round, EndType.Polygon);
+    // Trim the round-join arcs so each corner contributes ~1 candidate, not ~30.
+    paths = Clipper.simplifyPaths(inflated, SIMPLIFY_EPS, false).map(orientPositive);
+  } else {
+    paths = [base];
+  }
+  dilatedCache.set(key, paths);
+  return paths;
+}
+
+const RECT_CORNERS = (ifp: IfpRect): Point[] => [
+  { x: ifp.x0, y: ifp.y0 },
+  { x: ifp.x1, y: ifp.y0 },
+  { x: ifp.x0, y: ifp.y1 },
+  { x: ifp.x1, y: ifp.y1 },
+];
+
 /**
  * Candidate reference-point positions for the moving part: the vertices of
- * `IFP_rect − dilate(union(forbidden), kerf)`. `forbidden` are the moving part's pair-NFPs
- * already translated into sheet coordinates (the locus of reference positions that touch a
- * placed part). Returns an empty array when the part cannot fit the sheet or the feasible
- * region is empty (the caller then falls back to the legacy anchor path).
+ * `IFP_rect − union(dilate(NFP_i, kerf))`. Returns an empty array when the part cannot fit the
+ * sheet or the feasible region is empty (the caller then falls back to the legacy anchor path).
  */
-export function feasibleVertices(forbidden: Polygon[], ifp: IfpRect, kerf: number): Point[] {
+export function feasibleVertices(
+  forbidden: ForbiddenNfp[],
+  ifp: IfpRect,
+  kerf: number,
+  dilatedCache: Map<string, unknown>,
+): Point[] {
   // Part bigger than the sheet → no inner-fit rectangle.
   if (ifp.x1 < ifp.x0 || ifp.y1 < ifp.y0) return [];
 
@@ -75,54 +129,36 @@ export function feasibleVertices(forbidden: Polygon[], ifp: IfpRect, kerf: numbe
     ]),
   );
 
-  // Nothing placed yet (or no NFP built): the whole IFP rectangle is feasible; its corners
-  // are the candidates (bottom-left is the origin, preserving the legacy preference).
-  const usable = forbidden.filter((p) => p.length >= 3);
-  if (usable.length === 0) {
-    return [
-      { x: ifp.x0, y: ifp.y0 },
-      { x: ifp.x1, y: ifp.y0 },
-      { x: ifp.x0, y: ifp.y1 },
-      { x: ifp.x1, y: ifp.y1 },
-    ];
-  }
-
-  const subjects: Paths64 = usable.map((p) => orientPositive(toClipperPath(p)));
-  let forbiddenUnion = Clipper.Union(subjects, [], FillRule.NonZero);
-  if (forbiddenUnion.length === 0) {
-    return [
-      { x: ifp.x0, y: ifp.y0 },
-      { x: ifp.x1, y: ifp.y0 },
-      { x: ifp.x0, y: ifp.y1 },
-      { x: ifp.x1, y: ifp.y1 },
-    ];
-  }
-
-  // Kerf as a uniform outward dilation (Round = exact disk clearance). Miter/Square joins
-  // produce orientation-dependent shear in clipper2; Round is symmetric and correct.
-  if (kerf > 0) {
-    forbiddenUnion = Clipper.InflatePaths(
-      forbiddenUnion,
-      kerf * SCALE,
-      JoinType.Round,
-      EndType.Polygon,
+  // Collect the kerf-dilated, world-translated forbidden paths. One Difference subtracts their
+  // union from the IFP rect (clipper unions the clip set internally).
+  const clips: Paths64 = [];
+  for (const f of forbidden) {
+    if (f.nfp.length < 3) continue;
+    const local = dilatedPaths(dilatedCache, f.key, f.nfp, kerf);
+    const moved = Clipper.translatePaths(
+      local,
+      Math.round(f.offx * SCALE),
+      Math.round(f.offy * SCALE),
     );
+    for (const p of moved) clips.push(p);
   }
 
-  const feasibleRaw = Clipper.Difference([rect], forbiddenUnion, FillRule.NonZero);
-  if (feasibleRaw.length === 0) return [];
-  // Drop the round-join arc vertices so each corner contributes ~1 candidate, not ~30.
-  const feasible = Clipper.simplifyPaths(feasibleRaw, SIMPLIFY_EPS, false);
+  // Nothing placed yet (or no NFP built): the whole IFP rectangle is feasible; its corners are
+  // the candidates (bottom-left is the origin, preserving the legacy preference).
+  if (clips.length === 0) return RECT_CORNERS(ifp);
 
-  // Every vertex of the feasible region (outer rings and the boundaries of any interior
-  // holes — those are valid pocket seats) is an exact candidate. Dedupe on the integer grid.
+  const feasible = Clipper.Difference([rect], clips, FillRule.NonZero);
+  if (feasible.length === 0) return [];
+
+  // Every vertex of the feasible region (outer rings and the boundaries of any interior holes —
+  // those are valid pocket seats) is an exact candidate. Dedupe on the integer grid.
   const seen = new Set<number>();
   const out: Point[] = [];
   for (const path of feasible) {
     for (const pt of path) {
-      const key = pt.x * 4_000_003 + pt.y;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const k = pt.x * 4_000_003 + pt.y;
+      if (seen.has(k)) continue;
+      seen.add(k);
       out.push({ x: pt.x / SCALE, y: pt.y / SCALE });
     }
   }
