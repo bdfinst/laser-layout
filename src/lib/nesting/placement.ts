@@ -16,6 +16,7 @@ import {
   pointInPolygon,
 } from './nfp';
 import type { NfpCache } from './nfp-cache';
+import { recordBudgetOutcome } from './instrumentation';
 
 interface CachedPlacement {
   pp: PlacedPart;
@@ -733,6 +734,10 @@ function tryAdjacentPositions(
     }
     if (!best || better(cand, best) < 0) best = cand;
   }
+
+  // Diagnostic (#26): did the validate cap stop us with candidates still unexamined? If so,
+  // the genuinely tightest seat may have been truncated away before validation.
+  recordBudgetOutcome(validated >= VALIDATE_BUDGET && heap.size > 0, !!nfpCtx);
 
   return best ? { position: { x: best.x, y: best.y }, hole: null } : null;
 }

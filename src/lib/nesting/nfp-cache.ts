@@ -1,5 +1,6 @@
 import type { Polygon } from '$lib/geometry/types';
 import { orbitingNFP } from './orbiting-nfp';
+import { recordNfpCompute } from './instrumentation';
 
 /**
  * Per-pair No-Fit-Polygon cache (epic #24, phase P2).
@@ -74,6 +75,7 @@ export function createNfpCache(
       }
       misses++;
       const nfp = compute(a, b);
+      recordNfpCompute(nfp === null);
       if (map.size >= maxEntries) {
         const oldest = map.keys().next().value;
         if (oldest !== undefined) map.delete(oldest);
