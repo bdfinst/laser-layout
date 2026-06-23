@@ -7,6 +7,7 @@ import {
   type OptimizeProgress,
 } from './optimizer';
 import { computeSheetStats } from './stats';
+import { bottomLeftFill } from './placement';
 import { boundingBox, polygonArea } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
 
@@ -83,6 +84,44 @@ function withOriginalGeometry(placed: PlacedPart[], originals: Map<string, Part>
 
 function restoreUnplaced(remaining: Part[], originals: Map<string, Part>): Part[] {
   return remaining.map((p) => originals.get(p.id) ?? p);
+}
+
+/**
+ * Finalize a committed (simplified-geometry) sheet placement onto full-fidelity geometry.
+ *
+ * The GA searches on RDP-simplified outlines for speed, so a placement that is collision-free
+ * on the simplified shapes can still overlap once the original geometry is restored — the
+ * simplified outline can sit up to its RDP tolerance *inside* the real outline, and a convex
+ * bump shaved off by simplification then pokes into a neighbour. With a kerf gap that slack is
+ * absorbed, but common-line cutting drives the placement gap to 0, so the slack surfaces as
+ * overlapping cuts. To guarantee the rendered/exported result is overlap-free, re-run the
+ * deterministic bottom-left fill on the ORIGINAL outlines, reusing the GA's winning part order,
+ * rotations and mirrors. The exact collision test (concave-correct) then settles real positions
+ * that cannot interpenetrate. A part that no longer fits is simply omitted here and flows back to
+ * `remaining` via the caller's placed-id diff, so it overflows to the next sheet rather than
+ * overlapping. Scoped to common-line mode; every other path keeps the cheap geometry swap and is
+ * byte-for-byte unchanged.
+ *
+ * The re-seat runs WITHOUT the NFP cache even when the GA used it: the GA already chose the part
+ * order on fast simplified geometry, and full-fidelity orbiting NFP (hundreds of vertices per
+ * part, all pairs) is far too slow to repeat here. Plain bottom-left fill with concave anchors +
+ * the exact concave-correct collision test is enough to settle an overlap-free packing in that
+ * order, and runs in a fraction of the time.
+ */
+function finalizePlacement(
+  placed: PlacedPart[],
+  originals: Map<string, Part>,
+  config: NestingConfig,
+): PlacedPart[] {
+  if (!config.commonLineCutting || placed.length === 0) {
+    return withOriginalGeometry(placed, originals);
+  }
+  const ordered = placed.map((pp) => ({
+    part: originals.get(pp.part.id) ?? pp.part,
+    rotation: pp.rotation,
+    mirror: pp.mirror,
+  }));
+  return bottomLeftFill(ordered, config.sheet, placementKerf(config), true, null);
 }
 
 /**
@@ -264,12 +303,15 @@ export function* nestPartsIterative(
       break;
     }
 
-    sheets.push(
-      buildSheetResult(withOriginalGeometry(finalPlacement, originals), sheetIndex, config),
-    );
+    const finalized = finalizePlacement(finalPlacement, originals, config);
+    // The common-line exact pass re-seats on full geometry; if nothing seats, stop to avoid
+    // looping forever on parts that can't be made overlap-free on this sheet size.
+    if (finalized.length === 0) break;
+
+    sheets.push(buildSheetResult(finalized, sheetIndex, config));
 
     // Remove placed parts from remaining
-    const placedIds = new Set(finalPlacement.map((p) => p.part.id));
+    const placedIds = new Set(finalized.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
     sheetIndex++;
 
@@ -307,9 +349,12 @@ export function nestParts(
 
     if (placed.length === 0) break;
 
-    sheets.push(buildSheetResult(withOriginalGeometry(placed, originals), sheetIndex, config));
+    const finalized = finalizePlacement(placed, originals, config);
+    if (finalized.length === 0) break;
 
-    const placedIds = new Set(placed.map((p) => p.part.id));
+    sheets.push(buildSheetResult(finalized, sheetIndex, config));
+
+    const placedIds = new Set(finalized.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
     sheetIndex++;
 
@@ -398,11 +443,12 @@ export function packIntoKSheets(
   for (const group of partitionByArea(prepared, k)) {
     if (group.length === 0) continue;
     const placed = optimize(group, config.sheet, kerf, optConfig);
-    if (placed.length > 0) {
-      sheets.push(buildSheetResult(withOriginalGeometry(placed, originals), sheetIndex, config));
+    const finalized = finalizePlacement(placed, originals, config);
+    if (finalized.length > 0) {
+      sheets.push(buildSheetResult(finalized, sheetIndex, config));
       sheetIndex++;
     }
-    const placedIds = new Set(placed.map((p) => p.part.id));
+    const placedIds = new Set(finalized.map((p) => p.part.id));
     for (const p of group) if (!placedIds.has(p.id)) unplaced.push(p);
   }
 
