@@ -8,7 +8,7 @@ import {
 } from '$lib/geometry/polygon';
 import type { BoundingBox } from '$lib/geometry/types';
 import {
-  polygonsOverlap,
+  polygonsInterpenetrate,
   polygonsCloserThan,
   reflexVertices,
   insetPolygon as computeInsetPolygon,
@@ -839,14 +839,15 @@ function checkOverlap(
     // kerf > 0, exact: true-shape spacing — parts may approach until their actual outlines
     // are `kerf` apart (#11). kerf > 0, not exact: fast bounding-box approximation (any
     // bbox overlap within kerf is a collision) — used during GA search; the final
-    // committed placement is re-run exact (#19). kerf == 0: exact polygon overlap.
+    // committed placement is re-run exact (#19). kerf == 0: exact polygon interpenetration
+    // (concave-correct; touching is allowed so common-line parts may abut).
     if (kerf > 0) {
       if (!exact) return true; // fast bbox approximation
       if (polygonsCloserThan(translatedPoly, cp.polygon, kerf)) return true;
       continue;
     }
 
-    if (polygonsOverlap(translatedPoly, cp.polygon)) {
+    if (polygonsInterpenetrate(translatedPoly, cp.polygon)) {
       return true;
     }
   }

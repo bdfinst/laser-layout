@@ -200,10 +200,36 @@ export function pointInPolygon(point: Point, polygon: Polygon): boolean {
 
 /**
  * Check if two polygons overlap using Separating Axis Theorem (SAT).
- * Works for any convex polygons.
+ * Works for any convex polygons. For CONCAVE polygons use `polygonsInterpenetrate`
+ * instead — SAT can report false negatives (two concave shapes may overlap yet still
+ * have a separating edge-normal), which lets overlapping placements slip through.
  */
 export function polygonsOverlap(a: Polygon, b: Polygon): boolean {
   return !hasSeparatingAxis(a, b) && !hasSeparatingAxis(b, a);
+}
+
+/**
+ * True-shape interpenetration test for simple, possibly concave polygons. Returns true
+ * only when the outlines properly cross or one polygon contains a vertex of the other —
+ * i.e. genuine overlap. Touching along a shared edge or vertex is NOT interpenetration
+ * (segment crossings use strict orientation signs), so abutting common-line placements at
+ * kerf 0 are allowed. Use this instead of the convex-only `polygonsOverlap` whenever the
+ * inputs may be concave (every real part outline can be).
+ */
+export function polygonsInterpenetrate(a: Polygon, b: Polygon): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      if (segmentsIntersect(a1, a2, b[j], b[(j + 1) % b.length])) return true;
+    }
+  }
+  // No proper crossings ⇒ the polygons are disjoint or one is wholly inside the other.
+  // Any vertex of one inside the other settles it; checking all is cheap and robust to the
+  // case where the reference vertex happens to sit on a shared boundary.
+  if (a.some((p) => pointInPolygon(p, b))) return true;
+  if (b.some((p) => pointInPolygon(p, a))) return true;
+  return false;
 }
 
 function hasSeparatingAxis(a: Polygon, b: Polygon): boolean {
