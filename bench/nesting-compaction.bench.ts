@@ -5,6 +5,11 @@ import { parseLightBurn } from '$lib/parsers/lightburn-parser';
 import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
 import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts, nestPartsMultiStart, type NestingResult } from '$lib/nesting/engine';
+import {
+  enableNfpInstrumentation,
+  disableNfpInstrumentation,
+  nfpInstrumentationSnapshot,
+} from '$lib/nesting/instrumentation';
 import { getPlacedPolygons, boundingBox, polygonArea } from '$lib/geometry/polygon';
 import type { NestingConfig, Part } from '$lib/geometry/types';
 
@@ -265,6 +270,56 @@ describe('nesting compaction benchmark', () => {
           ].join('\t'),
         );
       }
+    }
+
+    // NFP placement diagnostics (#26): why does the NFP path plateau on lego-shelves?
+    // Measure (a) the orbiting-NFP null-rate — pairs whose orbit fails to close and silently
+    // fall back to anchors/true-shape, and (b) the validate-budget bite-rate — placements where
+    // the cap truncated candidates before the tightest seat was validated. High null-rate ⇒
+    // invest in orbiting-nfp.ts robustness; high bite-rate ⇒ the cap (or the lack of an exact
+    // NFP-union feasible region) is the bottleneck.
+    {
+      const { parts, quantities } = loadFixture('lego-shelves.lbrn2');
+      const [w, h] = [508, 762];
+      const config: NestingConfig = {
+        sheet: { width: w, height: h },
+        kerf: 1,
+        rotationSteps: 72,
+        populationSize: 30,
+        generations: 40,
+        useNfpPlacement: true,
+      };
+      enableNfpInstrumentation();
+      for (const seed of SEEDS) {
+        seedRandom(seed);
+        nestParts({ parts, quantities, config });
+      }
+      const snap = nfpInstrumentationSnapshot();
+      disableNfpInstrumentation();
+
+      rows.push('');
+      rows.push(['nfp-diagnostic', 'count', 'rate'].join('\t'));
+      rows.push(
+        [
+          'orbit-null',
+          `${snap.nfpNullComputes}/${snap.nfpTotalComputes}`,
+          (snap.nullRate * 100).toFixed(1) + '%',
+        ].join('\t'),
+      );
+      rows.push(
+        [
+          'budget-bite[nfp]',
+          `${snap.biteNfp}/${snap.biteNfp + snap.okNfp}`,
+          (snap.biteRateNfp * 100).toFixed(1) + '%',
+        ].join('\t'),
+      );
+      rows.push(
+        [
+          'budget-bite[fast]',
+          `${snap.biteFast}/${snap.biteFast + snap.okFast}`,
+          (snap.biteRateFast * 100).toFixed(1) + '%',
+        ].join('\t'),
+      );
     }
 
     Math.random = orig;
