@@ -8,7 +8,8 @@ import {
 } from './optimizer';
 import { computeSheetStats } from './stats';
 import { bottomLeftFill } from './placement';
-import { boundingBox, polygonArea } from '$lib/geometry/polygon';
+import { polygonsInterpenetrate } from './nfp';
+import { boundingBox, polygonArea, getPlacedPolygons } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
 
 export interface NestingInput {
@@ -113,15 +114,53 @@ function finalizePlacement(
   originals: Map<string, Part>,
   config: NestingConfig,
 ): PlacedPart[] {
-  if (!config.commonLineCutting || placed.length === 0) {
-    return withOriginalGeometry(placed, originals);
+  if (placed.length === 0) return withOriginalGeometry(placed, originals);
+
+  // Deterministic re-fill on full-fidelity outlines, reusing the GA's winning order/rotation/
+  // mirror. The exact concave-correct collision settles real, non-interpenetrating positions and
+  // omits any part that no longer fits (it overflows rather than overlapping).
+  const reseat = (): PlacedPart[] =>
+    bottomLeftFill(
+      placed.map((pp) => ({
+        part: originals.get(pp.part.id) ?? pp.part,
+        rotation: pp.rotation,
+        mirror: pp.mirror,
+      })),
+      config.sheet,
+      placementKerf(config),
+      true,
+      null,
+    );
+
+  // Common-line cutting drives the placement gap to 0, so the simplification slack always
+  // surfaces as overlapping cuts — re-seat unconditionally.
+  if (config.commonLineCutting) return reseat();
+
+  // Otherwise the cheap geometry swap is correct UNLESS the simplification slack (RDP tolerance
+  // is ~1% of the bbox, which exceeds the kerf on large parts) lets the full-fidelity outlines
+  // interpenetrate where the simplified ones only touched — exactly what the tight NFP feasible
+  // seats (#26) expose. Re-seat only when that actually happens, so density-optimal nests keep
+  // the GA's NFP packing and only a genuinely overlapping sheet pays for the deterministic refill.
+  const swapped = withOriginalGeometry(placed, originals);
+  return anyInterpenetration(swapped) ? reseat() : swapped;
+}
+
+/** True if any two placed parts' full-fidelity outer outlines interpenetrate (bbox-prefiltered). */
+function anyInterpenetration(placed: PlacedPart[]): boolean {
+  const items = placed.map((pp) => {
+    const poly = getPlacedPolygons(pp)[0];
+    return { poly, bb: boundingBox(poly) };
+  });
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i];
+      const b = items[j];
+      if (a.bb.maxX <= b.bb.minX || b.bb.maxX <= a.bb.minX) continue;
+      if (a.bb.maxY <= b.bb.minY || b.bb.maxY <= a.bb.minY) continue;
+      if (polygonsInterpenetrate(a.poly, b.poly)) return true;
+    }
   }
-  const ordered = placed.map((pp) => ({
-    part: originals.get(pp.part.id) ?? pp.part,
-    rotation: pp.rotation,
-    mirror: pp.mirror,
-  }));
-  return bottomLeftFill(ordered, config.sheet, placementKerf(config), true, null);
+  return false;
 }
 
 /**
