@@ -221,7 +221,8 @@
 
   .layout-svg {
     width: 100%;
-    max-height: 460px;
+    /* Preview scale: the portrait sheet is height-bound, so this cap sets the rendered size. */
+    max-height: 690px;
     border: 1px solid var(--border-strong);
     border-radius: 4px;
     background: var(--surface-inset);
