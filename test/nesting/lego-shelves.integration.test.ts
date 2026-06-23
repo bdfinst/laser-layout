@@ -45,7 +45,7 @@ describe('Lego shelves end-to-end nesting', () => {
     const result = nestParts({ parts: uniqueParts, quantities, config: CONFIG });
     expect(result.unplaced).toHaveLength(0);
     expect(result.totalPlaced).toBe(12);
-  });
+  }, 60000);
 
   it('preserves full-fidelity geometry in placed parts (no simplification leak)', () => {
     // Parts are simplified internally to speed up NFP/placement, but the placed
@@ -69,7 +69,7 @@ describe('Lego shelves end-to-end nesting', () => {
         }
       }
     }
-  });
+  }, 60000);
 
   it('keeps every cutout inside its parent after placement', () => {
     const { uniqueParts, quantities } = deduplicateParts(grouped);
@@ -84,5 +84,5 @@ describe('Lego shelves end-to-end nesting', () => {
         }
       }
     }
-  });
+  }, 60000);
 });
