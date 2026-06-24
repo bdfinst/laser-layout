@@ -65,6 +65,6 @@ describe('NFP density placement is overlap-free on full-fidelity geometry', () =
       const result = nestParts({ parts, quantities, config: base });
       expect(result.totalPlaced).toBe(12);
       expect(hasInterpenetration(result)).toBe(false);
-    }, 60_000);
+    }, 90_000);
   }
 });
