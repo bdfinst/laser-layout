@@ -5,38 +5,14 @@ import { parseLightBurn } from '$lib/parsers/lightburn-parser';
 import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
 import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts } from '$lib/nesting/engine';
-import type { Part, NestingConfig } from '$lib/geometry/types';
+import { makeRect as rect } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
+import type { NestingConfig } from '$lib/geometry/types';
 
 // Deterministic GA: seed Math.random with the same LCG the other nesting tests use,
 // so the recorded baselines below are reproducible.
-let origRandom: () => number;
-beforeEach(() => {
-  origRandom = Math.random;
-  let seed = 42;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
-
-function rect(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
+beforeEach(() => seedRandom());
+afterEach(() => restoreRandom());
 
 describe('density-aware nesting — effectiveness and non-regression (capstone)', () => {
   // A4: gap-filling effectiveness. A column-gap layout of SOLID rectangles (so the

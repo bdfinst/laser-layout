@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { parseLightBurn } from '$lib/parsers/lightburn-parser';
@@ -7,6 +7,7 @@ import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts } from '$lib/nesting/engine';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
 import { polygonContainsPolygon } from '$lib/nesting/nfp';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { NestingConfig, Part } from '$lib/geometry/types';
 
 // The panels are up to ~209 x 445 mm, so the sheet must be large enough to fit
@@ -26,6 +27,11 @@ function pipeline(): Part[] {
 
 describe('Lego shelves end-to-end nesting', () => {
   const grouped = pipeline();
+
+  // The GA is stochastic; pin the RNG so the exact placement-count assertions below
+  // are reproducible rather than relying on an unseeded run happening to place all parts.
+  beforeEach(() => seedRandom());
+  afterEach(() => restoreRandom());
 
   it('removes coincident duplicate lines and groups cutouts', () => {
     // 54 paths -> 34 unique shapes (every shape is drawn twice) ->

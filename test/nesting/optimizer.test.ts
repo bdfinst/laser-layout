@@ -10,23 +10,8 @@ import {
   DEFAULT_OPTIMIZER_CONFIG,
   type Individual,
 } from '$lib/nesting/optimizer';
-import type { Part } from '$lib/geometry/types';
-
-function makePart(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
+import { makeRect as makePart } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 
 // Convergence disarmed (stallWindow >= maxGenerations) so existing tests run a fixed count.
 const fastConfig = {
@@ -38,18 +23,8 @@ const fastConfig = {
 };
 
 // Seed Math.random for deterministic tests
-let origRandom: () => number;
-beforeEach(() => {
-  origRandom = Math.random;
-  let seed = 42;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
+beforeEach(() => seedRandom());
+afterEach(() => restoreRandom());
 
 describe('fitnessFromStats (pure)', () => {
   const sheetHeight = 100;

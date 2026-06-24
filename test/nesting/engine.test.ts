@@ -16,23 +16,9 @@ import {
 import { optimizeIterative } from '$lib/nesting/optimizer';
 import { computeSheetStats, openAreaStats, sharedEdgeLength } from '$lib/nesting/stats';
 import { bottomLeftFill } from '$lib/nesting/placement';
-import type { Part, NestingConfig } from '$lib/geometry/types';
-
-function makePart(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
+import { makeRect as makePart } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
+import type { NestingConfig } from '$lib/geometry/types';
 
 const fastConfig: NestingConfig = {
   sheet: { width: 100, height: 100 },
@@ -46,18 +32,8 @@ const fastConfig: NestingConfig = {
   stallEpsilon: 0.005,
 };
 
-let origRandom: () => number;
-beforeEach(() => {
-  origRandom = Math.random;
-  let seed = 42;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
+beforeEach(() => seedRandom());
+afterEach(() => restoreRandom());
 
 describe('global multi-sheet assignment (#16)', () => {
   // Full-width parts reduce nesting to 1D height bin-packing. With kerf=1, no two of these

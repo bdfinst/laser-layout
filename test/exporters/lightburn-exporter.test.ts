@@ -1,30 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
-import type { Part, PlacedPart } from '$lib/geometry/types';
-
-function makePlaced(
-  id: string,
-  w: number,
-  h: number,
-  x: number,
-  y: number,
-  rotation = 0,
-): PlacedPart {
-  const part: Part = {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-  return { part, x, y, rotation };
-}
+import { makePlaced } from '../support/parts';
+import type { Part } from '$lib/geometry/types';
 
 describe('exportToLightBurn', () => {
   it('generates valid XML', () => {
