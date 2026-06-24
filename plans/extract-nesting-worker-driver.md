@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-24
 **Branch**: test/seed-and-dedup-helpers (refactor should land on its own branch — see Risks)
-**Status**: approved (build deferred — ship the test-helper work first, then build on a fresh branch off main)
+**Status**: in-progress
 
 ## Goal
 
@@ -285,21 +285,21 @@ graph TD
 
 #### Wave 2
 
-- [ ] Slice 2: Extract `runWorkerLoop` with injected dependencies
-  - [ ] Step 2.1: Extract `runWorkerLoop` and reduce the handler to an adapter
-  - [ ] Step 2.2: Export the `handleMessage` adapter and guard the module-load side-effect
+- [x] Slice 2: Extract `runWorkerLoop` with injected dependencies
+  - [x] Step 2.1: Extract `runWorkerLoop` and reduce the handler to an adapter
+  - [x] Step 2.2: Export the `handleMessage` adapter and guard the module-load side-effect
 
 ### Acceptance Criteria
 
 - [x] `rehydrateQuantities` exported and unit-tested across all serialized forms + empty (Map→copy,
       verbatim `Number()`/NaN)
-- [ ] `runWorkerLoop` exported and unit-tested with injected post/now/schedule/run
-- [ ] Behavior preserved — coordinator + engine suites pass, message sequence unchanged
-- [ ] Zero-yield generator posts only done; budget cutoff returns best-so-far, never posts done before
+- [x] `runWorkerLoop` exported and unit-tested with injected post/now/schedule/run
+- [x] Behavior preserved — coordinator + engine suites pass, message sequence unchanged
+- [x] Zero-yield generator posts only done; budget cutoff returns best-so-far, never posts done before
       a result exists, and does post done once a result arrives past the deadline
-- [ ] Generator and setup errors each surface as exactly one error message (incl. non-`Error`
+- [x] Generator and setup errors each surface as exactly one error message (incl. non-`Error`
       `String()` path)
-- [ ] `handleMessage` posts nothing for non-start messages; module-load `self.onmessage` is guarded
+- [x] `handleMessage` posts nothing for non-start messages; module-load `self.onmessage` is guarded
 
 ## Plan Review Summary
 
