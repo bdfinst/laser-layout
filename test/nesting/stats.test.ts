@@ -12,23 +12,8 @@ import {
 import { bottomLeftFill } from '$lib/nesting/placement';
 import type { PlacedPart } from '$lib/geometry/types';
 import { polygonArea, boundingBox } from '$lib/geometry/polygon';
+import { makeRect as makePart } from '../support/parts';
 import type { Part, MaterialSheet } from '$lib/geometry/types';
-
-function makePart(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
 
 // Part with an outer boundary and an interior cutout (square hole).
 function makeHoledPart(id: string, w: number, h: number, hole: number): Part {

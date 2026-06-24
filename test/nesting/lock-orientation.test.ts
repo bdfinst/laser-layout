@@ -6,24 +6,12 @@ import {
   type Individual,
 } from '$lib/nesting/optimizer';
 import { nestParts } from '$lib/nesting/engine';
+import { makeRect } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { Part } from '$lib/geometry/types';
 
-function makePart(id: string, w: number, h: number, lockOrientation = false): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-    lockOrientation,
-  };
-}
+const makePart = (id: string, w: number, h: number, lockOrientation = false) =>
+  makeRect(id, w, h, { lockOrientation });
 
 const fastConfig = {
   ...DEFAULT_OPTIMIZER_CONFIG,
@@ -37,22 +25,9 @@ const fastConfig = {
   rotationSteps: 8,
 };
 
-// Deterministic LCG matching test/nesting/optimizer.test.ts, with a settable seed.
-let origRandom: () => number;
-function seedRandom(initial: number) {
-  let seed = initial % 2147483647;
-  if (seed <= 0) seed += 2147483646;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-}
-beforeEach(() => {
-  origRandom = Math.random;
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
+// Seed by default so every GA-driven test is deterministic without per-test opt-in.
+beforeEach(() => seedRandom());
+afterEach(() => restoreRandom());
 
 describe('toOrderedParts honors lockOrientation (consumption-time clamp)', () => {
   it('forces mirror false for a locked part regardless of its mirror gene, keyed by part index', () => {

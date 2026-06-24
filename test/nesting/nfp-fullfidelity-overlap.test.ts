@@ -7,6 +7,7 @@ import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts } from '$lib/nesting/engine';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
 import { polygonsInterpenetrate } from '$lib/nesting/nfp';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { NestingConfig } from '$lib/geometry/types';
 
 // Regression for the full-fidelity overlap bug (#26 follow-up). The GA packs on RDP-simplified
@@ -16,19 +17,7 @@ import type { NestingConfig } from '$lib/geometry/types';
 // geometry (no re-seat), surfacing the overlap. The engine now re-seats on full fidelity whenever
 // the swap interpenetrates, so the rendered/exported result must be overlap-free at any seed.
 
-const orig = Math.random;
-afterEach(() => {
-  Math.random = orig;
-});
-
-function seedRandom(seed: number) {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  Math.random = () => {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
+afterEach(() => restoreRandom());
 
 function hasInterpenetration(result: ReturnType<typeof nestParts>): boolean {
   for (const sheet of result.sheets) {

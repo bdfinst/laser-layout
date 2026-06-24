@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { parseLightBurn } from '$lib/parsers/lightburn-parser';
@@ -6,6 +6,7 @@ import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/gr
 import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts } from '$lib/nesting/engine';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { NestingConfig, Part, Point, Polygon } from '$lib/geometry/types';
 
 // Exercises the opt-in NFP placement path (epic #24, P3–P5: candidate seats, compactness
@@ -104,6 +105,10 @@ const Tshape: Polygon = [
 ];
 
 describe('NFP placement path (epic #24, P3–P5, opt-in)', () => {
+  // Pin the GA's RNG so the full-placement assertions are deterministic under the light budget.
+  beforeEach(() => seedRandom());
+  afterEach(() => restoreRandom());
+
   it('nests concave parts with no overlaps when enabled', () => {
     const parts = [makePart('L', Lshape, 0), makePart('T', Tshape, 1)];
     const quantities = new Map([

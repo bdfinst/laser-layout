@@ -7,24 +7,12 @@ import {
   type Individual,
 } from '$lib/nesting/optimizer';
 import { nestParts } from '$lib/nesting/engine';
+import { makeRect } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { Part } from '$lib/geometry/types';
 
-function makePart(id: string, w: number, h: number, grainConstraint = false): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-    grainConstraint,
-  };
-}
+const makePart = (id: string, w: number, h: number, grainConstraint = false) =>
+  makeRect(id, w, h, { grainConstraint });
 
 const PI = Math.PI;
 const HALF_PI = Math.PI / 2;
@@ -38,22 +26,10 @@ const fastConfig = {
   rotationSteps: 8, // includes 90°/270°, so the snap has something to clamp away
 };
 
-// Deterministic LCG, matching the other nesting tests, with a settable seed.
-let origRandom: () => number;
-function seedRandom(initial: number) {
-  let seed = initial % 2147483647;
-  if (seed <= 0) seed += 2147483646;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-}
-beforeEach(() => {
-  origRandom = Math.random;
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
+// Seed by default so determinism is the default, not a per-test opt-in; the integration
+// tests below re-seed with specific values for their own trajectories.
+beforeEach(() => seedRandom());
+afterEach(() => restoreRandom());
 
 describe('snapToGrain', () => {
   it('keeps the grain-allowed angles fixed', () => {

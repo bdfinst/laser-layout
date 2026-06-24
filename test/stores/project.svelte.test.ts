@@ -1,22 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { projectStore } from '$lib/stores/project.svelte';
-import type { Part } from '$lib/geometry/types';
-
-function rect(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
+import { makeRect as rect } from '../support/parts';
 
 beforeEach(() => {
   projectStore.reset();

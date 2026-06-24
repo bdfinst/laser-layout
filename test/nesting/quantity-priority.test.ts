@@ -1,23 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { nestParts } from '$lib/nesting/engine';
-import type { Part, NestingConfig } from '$lib/geometry/types';
+import { makeRect } from '../support/parts';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
+import type { NestingConfig } from '$lib/geometry/types';
 
-function makePart(id: string, w: number, h: number, priority?: 'required' | 'optional'): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-    priority,
-  };
-}
+const makePart = (id: string, w: number, h: number, priority?: 'required' | 'optional') =>
+  makeRect(id, w, h, { priority });
 
 const baseConfig: NestingConfig = {
   sheet: { width: 100, height: 100 },
@@ -28,22 +16,8 @@ const baseConfig: NestingConfig = {
   useNfpPlacement: false,
 };
 
-let origRandom: () => number;
-function seedRandom(initial: number) {
-  let seed = initial % 2147483647;
-  if (seed <= 0) seed += 2147483646;
-  Math.random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-}
-beforeEach(() => {
-  origRandom = Math.random;
-  seedRandom(13579);
-});
-afterEach(() => {
-  Math.random = origRandom;
-});
+beforeEach(() => seedRandom(13579));
+afterEach(() => restoreRandom());
 
 describe('quantity priority: optional parts are dropped instead of overflowing', () => {
   it('drops an optional part that does not fit beside the required part (1 sheet, not 2)', () => {

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { parseSVG } from '$lib/parsers/svg-parser';
+import type { Point } from '$lib/geometry/types';
+
+/**
+ * True when the tessellated polygon has a vertex within `tol` of (x, y). With
+ * CURVE_SEGMENTS = 16, the t = 0.5 sample lands exactly, so a curve's start, peak,
+ * and end are real vertices — checking them pins the curve geometry, not just that
+ * "some points" were produced (which a wrong-curve regression would also satisfy).
+ */
+function hasVertexNear(poly: Point[], x: number, y: number, tol = 1e-6): boolean {
+  return poly.some((p) => Math.hypot(p.x - x, p.y - y) <= tol);
+}
 
 describe('parseSVG', () => {
   it('parses a rect element', () => {
@@ -95,8 +106,12 @@ describe('parseSVG', () => {
 		</svg>`;
     const parts = parseSVG(svg);
     expect(parts).toHaveLength(1);
-    // Should have start + approximated curve points
-    expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+    const poly = parts[0].polygons[0];
+    expect(poly.length).toBeGreaterThan(2);
+    // Endpoints and the t=0.5 peak of B(t) for controls (10,20),(30,20) must lie on the curve.
+    expect(hasVertexNear(poly, 0, 0)).toBe(true);
+    expect(hasVertexNear(poly, 20, 15)).toBe(true);
+    expect(hasVertexNear(poly, 40, 0)).toBe(true);
   });
 
   it('parses a path with H and V commands', () => {
@@ -175,7 +190,12 @@ describe('parseSVG', () => {
 			<path d="M 0 0 Q 10 20 20 0"/>
 		</svg>`;
     const parts = parseSVG(svg);
-    expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+    const poly = parts[0].polygons[0];
+    expect(poly.length).toBeGreaterThan(2);
+    // Quadratic with control (10,20): start, t=0.5 peak (10,10), end.
+    expect(hasVertexNear(poly, 0, 0)).toBe(true);
+    expect(hasVertexNear(poly, 10, 10)).toBe(true);
+    expect(hasVertexNear(poly, 20, 0)).toBe(true);
   });
 
   it('parses multi-subpath (multiple M commands)', () => {
@@ -191,7 +211,13 @@ describe('parseSVG', () => {
 			<path d="M 0 0 C 5 10 15 10 20 0 S 35 -10 40 0"/>
 		</svg>`;
     const parts = parseSVG(svg);
-    expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+    const poly = parts[0].polygons[0];
+    expect(poly.length).toBeGreaterThan(2);
+    // Two cubic segments joined at (20,0); first-segment t=0.5 peak is (10,7.5).
+    expect(hasVertexNear(poly, 0, 0)).toBe(true);
+    expect(hasVertexNear(poly, 10, 7.5)).toBe(true);
+    expect(hasVertexNear(poly, 20, 0)).toBe(true);
+    expect(hasVertexNear(poly, 40, 0)).toBe(true);
   });
 
   it('parses smooth quadratic bezier path (T)', () => {
@@ -199,7 +225,13 @@ describe('parseSVG', () => {
 			<path d="M 0 0 Q 10 20 20 0 T 40 0"/>
 		</svg>`;
     const parts = parseSVG(svg);
-    expect(parts[0].polygons[0].length).toBeGreaterThan(2);
+    const poly = parts[0].polygons[0];
+    expect(poly.length).toBeGreaterThan(2);
+    // Quadratic then smooth-quadratic joined at (20,0); first-segment t=0.5 peak is (10,10).
+    expect(hasVertexNear(poly, 0, 0)).toBe(true);
+    expect(hasVertexNear(poly, 10, 10)).toBe(true);
+    expect(hasVertexNear(poly, 20, 0)).toBe(true);
+    expect(hasVertexNear(poly, 40, 0)).toBe(true);
   });
 
   it('parses relative h and v commands', () => {

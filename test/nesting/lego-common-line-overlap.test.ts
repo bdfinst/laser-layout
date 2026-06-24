@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { parseLightBurn } from '$lib/parsers/lightburn-parser';
@@ -7,6 +7,7 @@ import { deduplicateParts } from '$lib/geometry/dedup';
 import { nestParts } from '$lib/nesting/engine';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
 import { pointInPolygon } from '$lib/nesting/nfp';
+import { seedRandom, restoreRandom } from '../support/seeded-random';
 import type { NestingConfig, Part, Point, Polygon } from '$lib/geometry/types';
 
 // Real-overlap detector for simple (possibly concave) part outlines. Two parts genuinely
@@ -86,6 +87,12 @@ function nest(cfg: NestingConfig) {
 //      surfaced as overlapping cuts — fixed by re-seating the committed placement on
 //      full-fidelity geometry (finalizePlacement) in common-line mode.
 describe('Common-line cutting produces no overlapping cuts (lego-shelves)', () => {
+  // Seed 7 is the trajectory that reproduced the original 0.295mm interpenetration
+  // (see nfp-fullfidelity-overlap.test.ts), so pin it — an unseeded run may never
+  // exercise the regressing path and silently stop guarding the bug.
+  beforeEach(() => seedRandom(7));
+  afterEach(() => restoreRandom());
+
   it(
     'NFP + common-line (the reported scenario) abuts parts without interpenetration',
     () => {

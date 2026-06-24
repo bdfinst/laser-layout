@@ -3,23 +3,8 @@ import { bottomLeftFill } from '$lib/nesting/placement';
 import { createNfpCache } from '$lib/nesting/nfp-cache';
 import { getPlacedPolygons, boundingBox } from '$lib/geometry/polygon';
 import { polygonsOverlap, polygonsCloserThan } from '$lib/nesting/nfp';
+import { makeRect as makePart } from '../support/parts';
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
-
-function makePart(id: string, w: number, h: number): Part {
-  return {
-    id,
-    name: id,
-    polygons: [
-      [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ],
-    ],
-    sourceIndex: 0,
-  };
-}
 
 function makePartWithHole(
   id: string,
