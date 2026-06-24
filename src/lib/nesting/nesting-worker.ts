@@ -8,6 +8,23 @@ import {
 
 export type WorkerMessage = { type: 'start'; input: NestingInput };
 
+/**
+ * Rehydrate the part-quantities map from its structured-clone-serialized form. `postMessage`
+ * may deliver the `Map` as a `Map`, an array of `[id, count]` pairs, or a plain object depending
+ * on the browser, so accept all three wire forms (not `NestingInput['quantities']`, which is just
+ * `Map`). String values are coerced via `Number(...)` exactly as before — a non-numeric string
+ * therefore yields `NaN`. A `Map` input is returned as a copy, never the original reference.
+ */
+export function rehydrateQuantities(
+  raw: Map<string, number> | readonly [string, number][] | Record<string, number | string>,
+): Map<string, number> {
+  if (raw instanceof Map) return new Map(raw);
+  if (Array.isArray(raw)) return new Map(raw);
+  return new Map(
+    Object.entries(raw as Record<string, number | string>).map(([k, v]) => [k, Number(v)]),
+  );
+}
+
 export type WorkerResponse =
   | {
       type: 'progress';
@@ -24,19 +41,9 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
   if (msg.type !== 'start') return;
 
   try {
-    const raw = msg.input.quantities;
-    let entries: [string, number][];
-    if (raw instanceof Map) {
-      entries = Array.from(raw.entries());
-    } else if (Array.isArray(raw)) {
-      entries = raw;
-    } else {
-      entries = Object.entries(raw as Record<string, number>).map(([k, v]) => [k, Number(v)]);
-    }
-
     const input: NestingInput = {
       ...msg.input,
-      quantities: new Map(entries),
+      quantities: rehydrateQuantities(msg.input.quantities),
     };
 
     // Multi-start nesting (the engine owns all restart/best-keeping/early-stop policy). The
