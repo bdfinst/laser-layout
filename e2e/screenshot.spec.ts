@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import path from 'path';
 
 test('take screenshot of nested layout', async ({ page }) => {
@@ -35,6 +35,13 @@ test('take screenshot of nested layout', async ({ page }) => {
   await page.locator('.layout-svg').first().waitFor({ timeout: 30000 });
   await page.locator('button.nest-btn:not([disabled])').waitFor({ timeout: 90000 });
   await page.waitForTimeout(1000);
+
+  // Assert the run actually produced a rendered layout before capturing the asset, so this
+  // doubles as a smoke test of the full upload → nest → render flow rather than a bare side
+  // effect (it previously had no assertions).
+  const layout = page.locator('.layout-svg').first();
+  await expect(layout).toBeVisible();
+  await expect(layout.locator('path')).not.toHaveCount(0);
 
   // Scroll to top to capture the full layout
   await page.evaluate(() => window.scrollTo(0, 0));
