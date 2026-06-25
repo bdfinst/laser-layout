@@ -116,6 +116,29 @@ function pointDistance(
 }
 
 /**
+ * Slide distance for one endpoint (`point`) projecting into the interior of the opposing
+ * span `s1→s2`, measured along `dir`. A near-zero distance is only a real collision when the
+ * partner endpoint `other` is genuinely ahead (positive, non-grazing) along the same ray;
+ * otherwise the touch is a grazing artifact and contributes nothing. Returns null when there
+ * is no blocking collision. Shared by the four endpoint cases of `segmentDistance`.
+ */
+function interiorSlideDistance(
+  point: Point,
+  s1: Point,
+  s2: Point,
+  other: Point,
+  dir: Point,
+  overlap: number,
+): number | null {
+  let d = pointDistance(point, s1, s2, dir);
+  if (d !== null && almostEqual(d, 0)) {
+    const dOther = pointDistance(other, s1, s2, dir, true);
+    if (dOther === null || dOther < 0 || almostEqual(dOther * overlap, 0)) d = null;
+  }
+  return d;
+}
+
+/**
  * How far the moving edge E→F can travel along `direction` before colliding with the
  * static edge A→B. Returns null when no collision occurs along that ray. This is the
  * delicate kernel of the orbit; the four blocks mirror the four ways the two segments
@@ -176,17 +199,13 @@ function segmentDistance(a: Point, b: Point, e: Point, f: Point, direction: Poin
 
   const distances: number[] = [];
 
-  // Static endpoint A against the moving span E→F
+  // Static endpoints A, B against the moving span E→F (measured along `reverse`).
   if (almostEqual(dotA, dotE)) {
     distances.push(crossA - crossE);
   } else if (almostEqual(dotA, dotF)) {
     distances.push(crossA - crossF);
   } else if (dotA > efMin && dotA < efMax) {
-    let d = pointDistance(a, e, f, reverse);
-    if (d !== null && almostEqual(d, 0)) {
-      const dB = pointDistance(b, e, f, reverse, true);
-      if (dB === null || dB < 0 || almostEqual(dB * overlap, 0)) d = null;
-    }
+    const d = interiorSlideDistance(a, e, f, b, reverse, overlap);
     if (d !== null) distances.push(d);
   }
 
@@ -195,30 +214,18 @@ function segmentDistance(a: Point, b: Point, e: Point, f: Point, direction: Poin
   } else if (almostEqual(dotB, dotF)) {
     distances.push(crossB - crossF);
   } else if (dotB > efMin && dotB < efMax) {
-    let d = pointDistance(b, e, f, reverse);
-    if (d !== null && almostEqual(d, 0)) {
-      const dA = pointDistance(a, e, f, reverse, true);
-      if (dA === null || dA < 0 || almostEqual(dA * overlap, 0)) d = null;
-    }
+    const d = interiorSlideDistance(b, e, f, a, reverse, overlap);
     if (d !== null) distances.push(d);
   }
 
-  // Moving endpoints E, F against the static span A→B
+  // Moving endpoints E, F against the static span A→B (measured along `direction`).
   if (dotE > abMin && dotE < abMax) {
-    let d = pointDistance(e, a, b, direction);
-    if (d !== null && almostEqual(d, 0)) {
-      const dF = pointDistance(f, a, b, direction, true);
-      if (dF === null || dF < 0 || almostEqual(dF * overlap, 0)) d = null;
-    }
+    const d = interiorSlideDistance(e, a, b, f, direction, overlap);
     if (d !== null) distances.push(d);
   }
 
   if (dotF > abMin && dotF < abMax) {
-    let d = pointDistance(f, a, b, direction);
-    if (d !== null && almostEqual(d, 0)) {
-      const dE = pointDistance(e, a, b, direction, true);
-      if (dE === null || dE < 0 || almostEqual(dE * overlap, 0)) d = null;
-    }
+    const d = interiorSlideDistance(f, a, b, e, direction, overlap);
     if (d !== null) distances.push(d);
   }
 

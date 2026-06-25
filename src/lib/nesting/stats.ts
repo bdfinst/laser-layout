@@ -1,5 +1,15 @@
-import type { PlacedPart, MaterialSheet, Point } from '$lib/geometry/types';
+import type { PlacedPart, MaterialSheet, Point, Polygon } from '$lib/geometry/types';
 import { boundingBox, centroid, getPlacedPolygons, polygonArea } from '$lib/geometry/polygon';
+
+// Several metrics (open area, gravity, remnant) each need every placed part's
+// world-space polygons. In the GA hot path the same individual is scored by all of
+// them per generation, so each part would be rigid-body transformed multiple times.
+// Callers that score one placement with several metrics can transform once via
+// `getPlacedPolygons` and pass the result as `polysByPart` (indexed parallel to
+// `placed`); omitting it preserves the original per-call behaviour exactly.
+function polysFor(placed: PlacedPart[], index: number, polysByPart?: Polygon[][]): Polygon[] {
+  return polysByPart ? polysByPart[index] : getPlacedPolygons(placed[index]);
+}
 
 // Sheet statistics for nesting results. Single source of truth for strip height and
 // material utilization, consumed by both the GA fitness (optimizer) and the reported
@@ -26,10 +36,10 @@ function clamp(value: number, lo: number, hi: number): number {
  * and the reported utilization (1 - openAreaRatio) both come from here.
  */
 /** Max-Y extent of all placed parts — the single strip-height implementation. */
-function stripHeightOf(placed: PlacedPart[]): number {
+function stripHeightOf(placed: PlacedPart[], polysByPart?: Polygon[][]): number {
   let maxY = 0;
-  for (const pp of placed) {
-    for (const poly of getPlacedPolygons(pp)) {
+  for (let i = 0; i < placed.length; i++) {
+    for (const poly of polysFor(placed, i, polysByPart)) {
       const bb = boundingBox(poly);
       if (bb.maxY > maxY) maxY = bb.maxY;
     }
@@ -37,14 +47,18 @@ function stripHeightOf(placed: PlacedPart[]): number {
   return maxY;
 }
 
-export function openAreaStats(placed: PlacedPart[], sheet: MaterialSheet): OpenAreaStats {
+export function openAreaStats(
+  placed: PlacedPart[],
+  sheet: MaterialSheet,
+  polysByPart?: Polygon[][],
+): OpenAreaStats {
   if (placed.length === 0) {
     return { stripHeight: 0, partsArea: 0, usedArea: 0, openAreaRatio: 1, utilization: 0 };
   }
 
   let partsArea = 0;
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
+  for (let i = 0; i < placed.length; i++) {
+    const polys = polysFor(placed, i, polysByPart);
     if (polys.length === 0) continue;
 
     // True area: outer boundary minus interior cutouts.
@@ -55,7 +69,7 @@ export function openAreaStats(placed: PlacedPart[], sheet: MaterialSheet): OpenA
     partsArea += area;
   }
 
-  const stripHeight = stripHeightOf(placed);
+  const stripHeight = stripHeightOf(placed, polysByPart);
   const usedArea = stripHeight * sheet.width;
   const openAreaRatio = usedArea > 0 ? clamp((usedArea - partsArea) / usedArea, 0, 1) : 1;
   const utilization = 1 - openAreaRatio;
@@ -95,12 +109,16 @@ export function getStripHeight(placed: PlacedPart[]): number {
  * leftover space into a single offcut. Returns 0 for an empty placement (nothing to
  * pull). Uses each part's outer-boundary centroid weighted by its outer area.
  */
-export function gravityMetric(placed: PlacedPart[], sheet: MaterialSheet): number {
+export function gravityMetric(
+  placed: PlacedPart[],
+  sheet: MaterialSheet,
+  polysByPart?: Polygon[][],
+): number {
   let sumX = 0;
   let sumY = 0;
   let sumW = 0;
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
+  for (let i = 0; i < placed.length; i++) {
+    const polys = polysFor(placed, i, polysByPart);
     if (polys.length === 0) continue;
     const weight = polygonArea(polys[0]);
     const c = centroid(polys[0]);
@@ -165,6 +183,7 @@ export function remnantStats(
   placed: PlacedPart[],
   sheet: MaterialSheet,
   resolution: number = REMNANT_GRID_RESOLUTION,
+  polysByPart?: Polygon[][],
 ): RemnantStats {
   const sheetArea = sheet.width * sheet.height;
   if (sheetArea <= 0) return { largestRectArea: 0, largestRectRatio: 0 };
@@ -177,8 +196,8 @@ export function remnantStats(
   const grid: boolean[][] = Array.from({ length: rows }, () =>
     new Array<boolean>(cols).fill(false),
   );
-  for (const pp of placed) {
-    const polys = getPlacedPolygons(pp);
+  for (let i = 0; i < placed.length; i++) {
+    const polys = polysFor(placed, i, polysByPart);
     if (polys.length === 0) continue;
     const bb = boundingBox(polys[0]);
     const c0 = clampInt(Math.floor(bb.minX / cellW), 0, cols - 1);

@@ -6,6 +6,7 @@ import {
   applyMatrixToPolygon,
   cubicBezier,
 } from '$lib/geometry/affine';
+import { dropClosingVertex } from '$lib/geometry/polygon';
 import { CURVE_SEGMENTS, CIRCLE_SEGMENTS, MAX_DEPTH, MAX_FILE_SIZE } from './constants';
 
 function parseXForm(el: Element): AffineMatrix {
@@ -81,15 +82,7 @@ function buildPolygonFromPrimitives(verts: Vertex[], prims: Primitive[]): Polygo
     }
   }
 
-  if (points.length > 1) {
-    const last = points[points.length - 1];
-    const first = points[0];
-    if (Math.abs(last.x - first.x) < 0.001 && Math.abs(last.y - first.y) < 0.001) {
-      points.pop();
-    }
-  }
-
-  return points;
+  return dropClosingVertex(points);
 }
 
 /**
@@ -107,14 +100,7 @@ function buildPolygon(verts: Vertex[], primText: string): Polygon {
   // 'LineClosed' / 'Line': straight segments through every vertex in order.
   if (/^Line/i.test(trimmed)) {
     const points: Point[] = verts.map((v) => ({ x: v.x, y: v.y }));
-    if (points.length > 1) {
-      const last = points[points.length - 1];
-      const first = points[0];
-      if (Math.abs(last.x - first.x) < 0.001 && Math.abs(last.y - first.y) < 0.001) {
-        points.pop();
-      }
-    }
-    return points;
+    return dropClosingVertex(points);
   }
 
   return buildPolygonFromPrimitives(verts, parsePrimList(trimmed));

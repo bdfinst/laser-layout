@@ -121,6 +121,49 @@ export function getPlacedPolygons(pp: PlacedPart): Polygon[] {
   return transformPartPolygons(pp.part.polygons, pp.rotation, pp.x, pp.y, pp.mirror ?? false);
 }
 
+/**
+ * Drop a polygon's final vertex when it duplicates the first within `eps`.
+ * Parsers emit closed paths that repeat the start vertex; the engine, renderer,
+ * and exporters treat polygons as implicitly closed, so the explicit closing
+ * vertex must be removed. Returns the input unchanged when no closing duplicate
+ * is present.
+ */
+export function dropClosingVertex(points: Point[], eps = 0.001): Point[] {
+  if (points.length > 1) {
+    const last = points[points.length - 1];
+    const first = points[0];
+    if (Math.abs(last.x - first.x) < eps && Math.abs(last.y - first.y) < eps) {
+      return points.slice(0, -1);
+    }
+  }
+  return points;
+}
+
+/**
+ * Check if a point is inside a polygon using ray casting.
+ */
+export function pointInPolygon(point: Point, polygon: Polygon): boolean {
+  let inside = false;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x,
+      yi = polygon[i].y;
+    const xj = polygon[j].x,
+      yj = polygon[j].y;
+    if (yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Check if all vertices of `inner` are inside `outer`.
+ */
+export function polygonContainsPolygon(outer: Polygon, inner: Polygon): boolean {
+  return inner.every((p) => pointInPolygon(p, outer));
+}
+
 /** Convert a polygon to an SVG path d attribute string */
 export function toSVGPathD(polygon: Polygon, precision?: number): string {
   if (polygon.length === 0) return '';

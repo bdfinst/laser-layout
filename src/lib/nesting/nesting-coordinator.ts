@@ -27,8 +27,13 @@ export type WorkerFactory = () => WorkerLike;
 export interface CoordinatorHandlers {
   /** Best-so-far progress across all workers (result is already the global best). */
   onProgress: (currentSheet: number, generation: number, result: NestingResult) => void;
-  /** All workers finished (or failed after producing a result); `result` is the global best. */
-  onDone: (result: NestingResult, totalStarts: number) => void;
+  /**
+   * All workers finished (or failed after producing a result); `result` is the global best.
+   * `failedWorkers` is how many of the pool errored before completing — non-zero means the
+   * result is the best of a degraded pool, so a systematic worker failure isn't fully masked
+   * by one surviving worker.
+   */
+  onDone: (result: NestingResult, totalStarts: number, failedWorkers: number) => void;
   /** Every worker failed before producing any result. */
   onError: (message: string) => void;
 }
@@ -101,7 +106,12 @@ export function runParallelNest(
   const workers: WorkerLike[] = [];
   let best: NestingResult | null = null;
   let finished = 0;
-  let totalStarts = 0;
+  // Latest start count reported by each worker (progress and done both carry it). Summing the
+  // per-worker latest keeps the aggregate correct and deterministic even on the cutoff path,
+  // where finalize() can fire on any message — accumulating only `done` starts would report 0
+  // (or one worker's count) depending on which message wins the race.
+  const startsByWorker = new Array<number>(count).fill(0);
+  let failedWorkers = 0;
   let stopped = false;
   let done = false;
   // Set once the cutoff fires before any layout exists: finish the instant the first result lands.
@@ -122,7 +132,8 @@ export function runParallelNest(
     done = true;
     clearCutoff();
     for (const worker of workers) worker.terminate();
-    if (best) handlers.onDone(best, totalStarts);
+    const totalStarts = startsByWorker.reduce((sum, s) => sum + s, 0);
+    if (best) handlers.onDone(best, totalStarts, failedWorkers);
     else handlers.onError(lastError);
   };
 
@@ -140,6 +151,7 @@ export function runParallelNest(
       const msg = event.data;
       if (msg.type === 'progress') {
         best = mergeBest(best, msg.result);
+        startsByWorker[i] = msg.starts;
         if (forceFinish) {
           finalize();
           return;
@@ -147,15 +159,17 @@ export function runParallelNest(
         handlers.onProgress(msg.currentSheet, msg.generation, best);
       } else if (msg.type === 'done') {
         best = mergeBest(best, msg.result);
-        totalStarts += msg.starts;
+        startsByWorker[i] = msg.starts;
         if (forceFinish) {
           finalize();
           return;
         }
         finishOne();
       } else if (msg.type === 'error') {
-        // A failed worker still lets the pool succeed on the others' results.
+        // A failed worker still lets the pool succeed on the others' results, but we count it
+        // so a systematic failure surfaces via onDone's failedWorkers rather than being masked.
         lastError = msg.message;
+        failedWorkers++;
         finishOne();
       }
     };
@@ -163,6 +177,7 @@ export function runParallelNest(
     worker.onerror = (event) => {
       if (stopped || done) return;
       lastError = event instanceof Error ? event.message : 'Nesting worker error';
+      failedWorkers++;
       finishOne();
     };
 

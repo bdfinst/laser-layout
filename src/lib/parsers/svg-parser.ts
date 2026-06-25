@@ -8,6 +8,7 @@ import {
   quadraticBezier,
   parseTransformAttr,
 } from '$lib/geometry/affine';
+import { dropClosingVertex } from '$lib/geometry/polygon';
 import { CURVE_SEGMENTS, CIRCLE_SEGMENTS, MAX_DEPTH, MAX_FILE_SIZE } from './constants';
 
 function arcToPoints(
@@ -102,6 +103,15 @@ function tokenizePath(d: string): PathToken[] {
   }
 
   return expanded;
+}
+
+/**
+ * The smooth-curve commands (S/s/T/t) reflect the previous control point through the current
+ * point to get their implied first control point, falling back to the current point when the
+ * preceding command was not a matching curve (`lastCp` is null).
+ */
+function reflectControlPoint(cx: number, cy: number, lastCp: Point | null): Point {
+  return lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
 }
 
 function parsePath(d: string): Polygon[] {
@@ -201,7 +211,7 @@ function parsePath(d: string): Polygon[] {
         break;
       }
       case 'S': {
-        const cp1 = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
+        const cp1 = reflectControlPoint(cx, cy, lastCp);
         const pts = cubicBezier(
           { x: cx, y: cy },
           cp1,
@@ -216,7 +226,7 @@ function parsePath(d: string): Polygon[] {
         break;
       }
       case 's': {
-        const cp1 = lastCp ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y } : { x: cx, y: cy };
+        const cp1 = reflectControlPoint(cx, cy, lastCp);
         const pts = cubicBezier(
           { x: cx, y: cy },
           cp1,
@@ -257,9 +267,7 @@ function parsePath(d: string): Polygon[] {
         break;
       }
       case 'T': {
-        const cp: Point = lastCp
-          ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y }
-          : { x: cx, y: cy };
+        const cp = reflectControlPoint(cx, cy, lastCp);
         const pts = quadraticBezier(
           { x: cx, y: cy },
           cp,
@@ -273,9 +281,7 @@ function parsePath(d: string): Polygon[] {
         break;
       }
       case 't': {
-        const cp: Point = lastCp
-          ? { x: 2 * cx - lastCp.x, y: 2 * cy - lastCp.y }
-          : { x: cx, y: cy };
+        const cp = reflectControlPoint(cx, cy, lastCp);
         const pts = quadraticBezier(
           { x: cx, y: cy },
           cp,
@@ -290,13 +296,7 @@ function parsePath(d: string): Polygon[] {
       }
       case 'Z':
       case 'z':
-        if (currentPoly.length > 1) {
-          const last = currentPoly[currentPoly.length - 1];
-          const first = currentPoly[0];
-          if (Math.abs(last.x - first.x) < 0.001 && Math.abs(last.y - first.y) < 0.001) {
-            currentPoly.pop();
-          }
-        }
+        currentPoly = dropClosingVertex(currentPoly);
         cx = sx;
         cy = sy;
         lastCp = null;

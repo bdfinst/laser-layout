@@ -197,6 +197,28 @@ describe('runParallelNest', () => {
     expect(done).not.toBeNull();
   });
 
+  it('surfaces the failed-worker count to onDone so a degraded pool is not masked', () => {
+    const workers: ReturnType<typeof fakeWorker>[] = [];
+    const factory = () => {
+      const w = fakeWorker();
+      workers.push(w);
+      return w;
+    };
+    let failed = -1;
+    runParallelNest({}, 3, factory, {
+      ...noopHandlers,
+      onDone: (_r, _starts, failedWorkers) => {
+        failed = failedWorkers;
+      },
+    });
+
+    workers[0].emit({ type: 'error', message: 'boom' });
+    workers[1].emit({ type: 'error', message: 'boom2' });
+    workers[2].emit({ type: 'done', result: result(0, 1), starts: 4 });
+
+    expect(failed).toBe(2);
+  });
+
   it('reports an error only when every worker fails without a result', () => {
     const workers: ReturnType<typeof fakeWorker>[] = [];
     const factory = () => {
@@ -265,6 +287,9 @@ describe('runParallelNest', () => {
     fire!();
     expect(done).not.toBeNull();
     expect(done!.result.sheets).toHaveLength(1);
+    // The cutoff path still reports the progress-reported starts (2), not 0 — per-worker latest
+    // start counts are summed, so the count is meaningful regardless of which message finalizes.
+    expect(done!.totalStarts).toBe(2);
     expect(workers.every((w) => w.terminated)).toBe(true);
 
     // A late straggler message after the cutoff must not double-finalize.

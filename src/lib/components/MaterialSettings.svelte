@@ -2,6 +2,7 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import DimensionInput from './DimensionInput.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { DEFAULT_NEST_BUDGET_MS } from '$lib/nesting/engine';
 
   function onToleranceChange(e: Event) {
     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -18,7 +19,7 @@
   }
 
   function timeBudgetSeconds(): number {
-    return Math.round((projectStore.state.config.timeBudgetMs ?? 60000) / 1000);
+    return Math.round((projectStore.state.config.timeBudgetMs ?? DEFAULT_NEST_BUDGET_MS) / 1000);
   }
 
   function onTimeBudgetChange(e: Event) {
