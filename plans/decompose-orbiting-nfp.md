@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-25
 **Branch**: review/code-review-fixes
-**Status**: approved
+**Status**: implemented
 
 ## Goal
 
@@ -27,13 +27,13 @@ exact-output characterization net authored first.
 
 ## Acceptance Criteria
 
-- [ ] `orbitingNFP(staticPoly, orbitingPoly)` keeps its exact signature and return convention; `npm run check` passes.
-- [ ] Existing `test/nesting/orbiting-nfp.test.ts` property/fuzz suite passes unchanged (no test edits to accommodate the refactor).
-- [ ] `lego-shelves[nfp=1]` integration baselines unchanged — `trueFill` and sheet count identical.
-- [ ] A new exact-output characterization test pins `orbitingNFP` output (incl. shared-horizontal-edge and `null`-returning pairs) and stays green across the refactor.
-- [ ] `orbitingNFP` body is materially smaller; the five phases live in named helpers; complexity-review no longer flags the function.
-- [ ] Diff touches only `orbiting-nfp.ts` and its tests; no tolerance constants, `maxIter`, or algorithm parameters altered.
-- [ ] `npm run lint`, `npm run check`, `npm test` all pass.
+- [x] `orbitingNFP(staticPoly, orbitingPoly)` keeps its exact signature and return convention; `npm run check` passes.
+- [x] Existing `test/nesting/orbiting-nfp.test.ts` property/fuzz suite passes unchanged (no test edits to accommodate the refactor).
+- [x] `lego-shelves[nfp=1]` integration baselines unchanged — `trueFill` and sheet count identical (guaranteed by exact-output equality; integration test green).
+- [x] A new exact-output characterization test pins `orbitingNFP` output (incl. shared-horizontal-edge and `null`-returning pairs) and stays green across the refactor.
+- [x] `orbitingNFP` body is materially smaller; the five phases live in named helpers; complexity-review no longer flags the function.
+- [x] Diff touches only `orbiting-nfp.ts` and its tests; no tolerance constants, `maxIter`, or algorithm parameters altered.
+- [x] `npm run lint`, `npm run check`, `npm test` all pass.
 
 ## Slices
 
@@ -229,20 +229,20 @@ Human-review-only (not mechanically gated — verified at PR review):
 
 #### Wave 2
 
-- [ ] Slice 2: Decompose the orbit loop into named phases
-  - [ ] Step 2.1: Introduce the orbit-cursor struct and extract `collectContacts`
-  - [ ] Step 2.2: Extract `slideVectorsFor` and `pickLongestSlide`
-  - [ ] Step 2.3: Extract loop-closure helpers (`hasClosedOrbit`/`hasRevisitedTrace`) and finalize
+- [x] Slice 2: Decompose the orbit loop into named phases
+  - [x] Step 2.1: Introduce the orbit-cursor struct and extract `collectContacts`
+  - [x] Step 2.2: Extract `slideVectorsFor` and `pickLongestSlide`
+  - [x] Step 2.3: Extract loop-closure helpers (`hasClosedOrbit`/`hasRevisitedTrace`) and finalize
 
 ### Acceptance Criteria
 
-- [ ] Public signature + return convention unchanged; `npm run check` passes
-- [ ] Existing property/fuzz suite passes unchanged
-- [ ] `lego-shelves[nfp=1]` baselines (`trueFill` + sheet count) unchanged
+- [x] Public signature + return convention unchanged; `npm run check` passes
+- [x] Existing property/fuzz suite passes unchanged
+- [x] `lego-shelves[nfp=1]` baselines (`trueFill` + sheet count) unchanged — guaranteed by exact-output equality; `density-nesting.integration.test.ts` green (bench confirmatory)
 - [x] Exact-output characterization test pins output and stays green
-- [ ] `orbitingNFP` decomposed into named helpers; complexity-review no longer flags it
-- [ ] Diff touches only `orbiting-nfp.ts` + tests; no tolerance/param changes
-- [ ] `npm run lint`, `npm run check`, `npm test` all pass
+- [x] `orbitingNFP` decomposed into named helpers; complexity-review no longer flags it
+- [x] Diff touches only `orbiting-nfp.ts` + tests; no tolerance/param changes
+- [x] `npm run lint`, `npm run check`, `npm test` all pass
 
 ## Plan Review Summary
 
