@@ -167,40 +167,40 @@ interface PositionHeap {
  * beats fully sorting all candidates O(N log N). Extraction order matches the old stable sort
  * for every candidate that differs; the only ties are candidates at the *same* (x, y), which
  * resolve to an identical placement regardless of order — so the result is behaviour-preserving.
- * Heapifies `d` in place.
+ * Heapifies `positions` in place.
  */
 function createPositionHeap(
-  d: ScoredPosition[],
+  positions: ScoredPosition[],
   less: (a: ScoredPosition, b: ScoredPosition) => boolean,
 ): PositionHeap {
   const siftDown = (start: number): void => {
-    const n = d.length;
+    const n = positions.length;
     let i = start;
     for (;;) {
       const l = 2 * i + 1;
       const r = 2 * i + 2;
       let m = i;
-      if (l < n && less(d[l], d[m])) m = l;
-      if (r < n && less(d[r], d[m])) m = r;
+      if (l < n && less(positions[l], positions[m])) m = l;
+      if (r < n && less(positions[r], positions[m])) m = r;
       if (m === i) break;
-      const tmp = d[i];
-      d[i] = d[m];
-      d[m] = tmp;
+      const tmp = positions[i];
+      positions[i] = positions[m];
+      positions[m] = tmp;
       i = m;
     }
   };
 
-  for (let i = (d.length >> 1) - 1; i >= 0; i--) siftDown(i);
+  for (let i = (positions.length >> 1) - 1; i >= 0; i--) siftDown(i);
 
   return {
     get size(): number {
-      return d.length;
+      return positions.length;
     },
     pop(): ScoredPosition {
-      const top = d[0];
-      const last = d.pop()!;
-      if (d.length > 0) {
-        d[0] = last;
+      const top = positions[0];
+      const last = positions.pop()!;
+      if (positions.length > 0) {
+        positions[0] = last;
         siftDown(0);
       }
       return top;
@@ -208,11 +208,19 @@ function createPositionHeap(
   };
 }
 
+// NFP cache-key resolution: vertices are quantized to 1/SIGNATURE_QUANTIZATION mm so that
+// near-identical shapes share a key. 64 ⇒ ~1/64 mm (~0.016 mm) buckets.
+const SIGNATURE_QUANTIZATION = 64;
+
 /** Quantized vertex signature — stable, instance-unifying NFP cache key for a polygon. */
-function polySignature(poly: Polygon): string {
+function polygonSignature(poly: Polygon): string {
   let s = '';
   for (let i = 0; i < poly.length; i++) {
-    s += Math.round(poly[i].x * 64) + ',' + Math.round(poly[i].y * 64) + ';';
+    s +=
+      Math.round(poly[i].x * SIGNATURE_QUANTIZATION) +
+      ',' +
+      Math.round(poly[i].y * SIGNATURE_QUANTIZATION) +
+      ';';
   }
   return s;
 }
@@ -299,7 +307,7 @@ export function bottomLeftFill(
 
       if (partW > sheet.width || partH > sheet.height) continue;
 
-      const sig = useNfp ? polySignature(normalized) : '';
+      const sig = useNfp ? polygonSignature(normalized) : '';
       const nfpCtx: NfpCtx | undefined =
         useNfp && nfpCache
           ? { cache: nfpCache, movingSig: sig, movingPoly: normalized }
@@ -406,6 +414,12 @@ function extractHoles(
 
 // --- Phase helpers for findBestPosition ---
 
+// Hole (interior-gap) placements always sort ahead of sheet placements: a part tucked into
+// an existing cutout is strictly better than opening exterior space. This large negative bias
+// guarantees that priority; among holes themselves, larger holeArea breaks ties (it is added
+// to the bias, so it never lifts a hole score into sheet-placement range).
+const HOLE_PLACEMENT_BIAS = -1e9;
+
 function tryHolePlacement(
   normalizedPoly: Polygon,
   partBB: { width: number; height: number },
@@ -448,7 +462,7 @@ function tryHolePlacement(
       if (checkOverlap(translated, translatedBB, hole.innerPlacements, holeCtx)) continue;
 
       const holeArea = hole.holeBB.width * hole.holeBB.height;
-      holeCandidates.push({ ...pos, score: -1e9 + holeArea, hole });
+      holeCandidates.push({ ...pos, score: HOLE_PLACEMENT_BIAS + holeArea, hole });
     }
   }
 
@@ -574,8 +588,8 @@ function placedUnionBB(cache: CachedPlacement[]): BoundingBox | null {
  * the compactness metric (P4) minimizes exactly this — a pocket seat that tucks under the
  * current ceiling keeps it flat and wins over an exterior spot that raises it.
  */
-function resultingStrip(u: BoundingBox | null, y: number, h: number): number {
-  return u ? Math.max(u.maxY, y + h) : y + h;
+function resultingStrip(union: BoundingBox | null, y: number, h: number): number {
+  return union ? Math.max(union.maxY, y + h) : y + h;
 }
 
 /**

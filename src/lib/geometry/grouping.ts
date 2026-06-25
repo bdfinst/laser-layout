@@ -102,10 +102,10 @@ export function groupByContainment(parts: Part[]): Part[] {
   // Depth = number of ancestors. Even depth => solid (its own part).
   for (const node of nodes) {
     let depth = 0;
-    let p = node.parent;
-    while (p !== -1) {
+    let parentIdx = node.parent;
+    while (parentIdx !== -1) {
       depth++;
-      p = nodes[p].parent;
+      parentIdx = nodes[parentIdx].parent;
     }
     node.depth = depth;
   }
