@@ -1,6 +1,11 @@
 import type { Part } from './types';
 import { boundingBox } from './polygon';
 
+/** Padding around the part's bounding box in the viewBox, as a fraction of its larger dimension. */
+const PAD_RATIO = 0.08;
+/** Outline stroke width, as a fraction of the part's larger dimension. */
+const STROKE_RATIO = 0.02;
+
 /** Display geometry for a part's outline thumbnail. */
 export interface PartThumbnail {
   /** Outer-polygon bounding-box width (mm). */
@@ -22,11 +27,11 @@ export interface PartThumbnail {
 export function partThumbnail(part: Part): PartThumbnail {
   const bb = boundingBox(part.polygons[0]);
   const span = Math.max(bb.width, bb.height);
-  const pad = span * 0.08;
+  const pad = span * PAD_RATIO;
   return {
     width: bb.width,
     height: bb.height,
     viewBox: `${bb.minX - pad} ${bb.minY - pad} ${bb.width + pad * 2} ${bb.height + pad * 2}`,
-    strokeWidth: span * 0.02,
+    strokeWidth: span * STROKE_RATIO,
   };
 }

@@ -258,6 +258,19 @@ export interface OptimizeProgress {
   bestPlacement: PlacedPart[];
 }
 
+// GA tuning constants (#19). The fittest fraction carried unchanged into the next generation.
+const ELITE_FRACTION = 0.1;
+// Density mode (NFP placement on) spends this fraction of the generation budget in the costly
+// exact/NFP refinement phase, trading time for density.
+const EXACT_BUDGET_FRACTION = 1 / 3;
+// Default (true-shape) path keeps the exact phase a short capped tail instead.
+const EXACT_BUDGET_DEFAULT_FRACTION = 1 / 4;
+const EXACT_BUDGET_DEFAULT_CAP = 12;
+// Memetic polish (#39) evaluation budget — small in NFP mode (each exact eval is ~35x bbox cost),
+// freer on the default path. Always bounded so it can't balloon.
+const POLISH_BUDGET_NFP = 12;
+const POLISH_BUDGET_DEFAULT = 150;
+
 /**
  * Genetic algorithm optimizer that searches for the best rotation angles
  * and placement order to minimize the strip height on the material.
@@ -283,16 +296,26 @@ export function* optimizeIterative(
   const nfpCache: NfpCache | null = config.useNfpPlacement ? createNfpCache() : null;
 
   // Remnant-aware fitness weights (#41), resolved once and threaded to every evaluation.
-  const gw = config.gravityWeight;
-  const rw = config.remnantWeight;
+  const gravityWeight = config.gravityWeight;
+  const remnantWeight = config.remnantWeight;
   // Common-line cutting reward (#43): undefined ⇒ off, so default runs are unchanged.
-  const cw = config.commonLineWeight;
+  const commonLineWeight = config.commonLineWeight;
 
   // Initialize population
   let population: Individual[] = [];
   for (let i = 0; i < config.populationSize; i++) {
     const individual = createRandomIndividual(n, angleStep, config.rotationSteps);
-    individual.fitness = evaluate(individual, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
+    individual.fitness = evaluate(
+      individual,
+      parts,
+      sheet,
+      kerf,
+      false,
+      nfpCache,
+      gravityWeight,
+      remnantWeight,
+      commonLineWeight,
+    );
     population.push(individual);
   }
 
@@ -304,7 +327,17 @@ export function* optimizeIterative(
     fitness: 0,
     placement: [],
   };
-  noRotation.fitness = evaluate(noRotation, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
+  noRotation.fitness = evaluate(
+    noRotation,
+    parts,
+    sheet,
+    kerf,
+    false,
+    nfpCache,
+    gravityWeight,
+    remnantWeight,
+    commonLineWeight,
+  );
   population[0] = noRotation;
 
   // Seed a few individuals with biggest-first heuristic orderings (#13).
@@ -317,7 +350,17 @@ export function* optimizeIterative(
       fitness: 0,
       placement: [],
     };
-    seeded.fitness = evaluate(seeded, parts, sheet, kerf, false, nfpCache, gw, rw, cw);
+    seeded.fitness = evaluate(
+      seeded,
+      parts,
+      sheet,
+      kerf,
+      false,
+      nfpCache,
+      gravityWeight,
+      remnantWeight,
+      commonLineWeight,
+    );
     population[s + 1] = seeded;
   }
 
@@ -330,14 +373,20 @@ export function* optimizeIterative(
   // converges, then spend a short tail of generations refining with EXACT collision — long
   // enough for the GA to discover interlocking placements, cheap enough to stay fast. Total
   // generations stay bounded by maxGenerations.
-  const eliteCount = Math.max(1, Math.floor(config.populationSize * 0.1));
+  const eliteCount = Math.max(1, Math.floor(config.populationSize * ELITE_FRACTION));
   // Exact (true-shape / NFP) refinement is where density is won. Normally it's a short,
   // capped tail (the exact phase is costly). In density mode (NFP placement on) the app
   // trades time for density, so spend a third of the budget refining with NFP rather than
   // the ~12-generation cap — bounded overall by the worker's wall-clock budget.
   const exactBudget = config.useNfpPlacement
-    ? Math.max(1, Math.floor(config.maxGenerations / 3))
-    : Math.max(1, Math.min(12, Math.floor(config.maxGenerations / 4)));
+    ? Math.max(1, Math.floor(config.maxGenerations * EXACT_BUDGET_FRACTION))
+    : Math.max(
+        1,
+        Math.min(
+          EXACT_BUDGET_DEFAULT_CAP,
+          Math.floor(config.maxGenerations * EXACT_BUDGET_DEFAULT_FRACTION),
+        ),
+      );
   const fastCap = config.maxGenerations - exactBudget;
   const history: number[] = [];
   let exact = false;
@@ -355,7 +404,17 @@ export function* optimizeIterative(
       if (Math.random() < config.mutationRate) {
         child = mutate(child, angleStep, config.rotationSteps);
       }
-      child.fitness = evaluate(child, parts, sheet, kerf, exact, nfpCache, gw, rw, cw);
+      child.fitness = evaluate(
+        child,
+        parts,
+        sheet,
+        kerf,
+        exact,
+        nfpCache,
+        gravityWeight,
+        remnantWeight,
+        commonLineWeight,
+      );
       nextGen.push(child);
     }
 
@@ -373,7 +432,17 @@ export function* optimizeIterative(
         // Switch to exact refinement: re-score the whole population with true-shape
         // collision so fitness is comparable, then reset the stall window.
         for (const ind of population)
-          ind.fitness = evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw, cw);
+          ind.fitness = evaluate(
+            ind,
+            parts,
+            sheet,
+            kerf,
+            true,
+            nfpCache,
+            gravityWeight,
+            remnantWeight,
+            commonLineWeight,
+          );
         population.sort((a, b) => a.fitness - b.fitness);
         exact = true;
         history.length = 0;
@@ -395,10 +464,21 @@ export function* optimizeIterative(
   // worse than the GA's best.
   // Keep polish cheap in NFP mode (each exact evaluation is ~35x the bbox cost) and let it
   // run more freely on the default true-shape path. Always bounded so it can't balloon.
-  const polishBudget = config.useNfpPlacement ? 12 : 150;
+  const polishBudget = config.useNfpPlacement ? POLISH_BUDGET_NFP : POLISH_BUDGET_DEFAULT;
   const polished = localSearchPolish(
     population[0],
-    (ind) => evaluate(ind, parts, sheet, kerf, true, nfpCache, gw, rw, cw),
+    (ind) =>
+      evaluate(
+        ind,
+        parts,
+        sheet,
+        kerf,
+        true,
+        nfpCache,
+        gravityWeight,
+        remnantWeight,
+        commonLineWeight,
+      ),
     { angleStep, maxEvaluations: polishBudget },
   );
   return polished.placement;
