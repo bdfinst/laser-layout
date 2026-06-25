@@ -1,7 +1,13 @@
 <script lang="ts">
   import { projectStore, toDisplayUnits } from '$lib/stores/project.svelte';
-  import { boundingBox, toSVGPathD } from '$lib/geometry/polygon';
+  import { toSVGPathD } from '$lib/geometry/polygon';
+  import { partThumbnail } from '$lib/geometry/thumbnail';
   import { tooltip } from '$lib/actions/tooltip';
+
+  // Compute each part's thumbnail geometry once per parts-change, not per render.
+  const thumbnails = $derived(
+    new Map(projectStore.state.parts.map((p) => [p.id, partThumbnail(p)])),
+  );
 
   function onQuantityChange(partId: string, e: Event) {
     const input = e.target as HTMLInputElement;
@@ -39,11 +45,6 @@
     return total;
   }
 
-  function thumbViewBox(bb: { minX: number; minY: number; width: number; height: number }): string {
-    const pad = Math.max(bb.width, bb.height) * 0.08;
-    return `${bb.minX - pad} ${bb.minY - pad} ${bb.width + pad * 2} ${bb.height + pad * 2}`;
-  }
-
   const THUMB_SIZE = 48;
 </script>
 
@@ -52,13 +53,13 @@
     <h3>Parts ({totalParts()} total)</h3>
     <div class="parts">
       {#each projectStore.state.parts as part (part.id)}
-        {@const bb = boundingBox(part.polygons[0])}
+        {@const thumb = thumbnails.get(part.id)!}
         <div class="part-row">
           <div class="thumb">
             <svg
               width={THUMB_SIZE}
               height={THUMB_SIZE}
-              viewBox={thumbViewBox(bb)}
+              viewBox={thumb.viewBox}
               xmlns="http://www.w3.org/2000/svg"
             >
               {#each part.polygons as poly, polyIdx (polyIdx)}
@@ -66,15 +67,15 @@
                   d={toSVGPathD(poly)}
                   fill="#2ee6d61f"
                   stroke="#2ee6d6"
-                  stroke-width={Math.max(bb.width, bb.height) * 0.02}
+                  stroke-width={thumb.strokeWidth}
                 />
               {/each}
             </svg>
           </div>
           <div class="info">
             <span class="name" title={part.name}>{part.name}</span>
-            <span class="size">{fmtMm(bb.width)} × {fmtMm(bb.height)} mm</span>
-            <span class="size alt">{fmtIn(bb.width)} × {fmtIn(bb.height)} in</span>
+            <span class="size">{fmtMm(thumb.width)} × {fmtMm(thumb.height)} mm</span>
+            <span class="size alt">{fmtIn(thumb.width)} × {fmtIn(thumb.height)} in</span>
           </div>
           <div class="qty" use:tooltip={'Number of copies of this part to nest.'}>
             <input

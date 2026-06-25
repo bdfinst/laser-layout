@@ -10,6 +10,7 @@ import {
 } from '$lib/geometry/affine';
 import { dropClosingVertex } from '$lib/geometry/polygon';
 import { CURVE_SEGMENTS, CIRCLE_SEGMENTS, MAX_DEPTH, MAX_FILE_SIZE } from './constants';
+import { pushPart } from './part-builder';
 
 function arcToPoints(
   cx: number,
@@ -392,14 +393,8 @@ function processElement(
 
   if (polygons.length > 0) {
     const transformed = polygons.map((p) => applyMatrixToPolygon(matrix, p));
-    const id = el.getAttribute('id') || `${tag}-${counter.value}`;
-    parts.push({
-      id: `part-${counter.value}`,
-      name: id,
-      polygons: transformed,
-      sourceIndex: counter.value,
-    });
-    counter.value++;
+    const name = el.getAttribute('id') || `${tag}-${counter.value}`;
+    pushPart(parts, transformed, name, counter);
   }
 }
 
