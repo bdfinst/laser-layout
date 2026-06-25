@@ -117,3 +117,21 @@ No public engine/optimizer API changes — these are module-internal functions.
 - [x] Every gap/ambiguity finding is logged — all four `inferable` with rationale; none require stakeholder input.
 
 **Verdict: PASS** — ready for `/plan`.
+
+## Amendments (post-plan-review, 2026-06-25)
+
+Resolved during `/plan` review; these supersede the body text where they conflict, so a
+spec-compliance reviewer should treat them as authoritative:
+
+1. **`PlacementContext` field name**: the bundled `PlacedIndex` is named **`index`**, not `cache`,
+   to avoid a readability collision with `NfpCtx.cache` (an `NfpCache`). All other fields unchanged.
+2. **`checkOverlap` threading is partial**: `checkOverlap` keeps its per-call `placements` argument
+   (a `cache.query()` result, not a tuple member) and additionally receives the context, reading only
+   `ctx.kerf`/`ctx.exact`/`ctx.nfpCtx`. AC #5's "threaded through `checkOverlap`" is satisfied in this
+   partial form.
+3. **`collectCandidatePositions` signature**: takes `(partBB, ctx)` (the bundled form), superseding the
+   positional `(cache, partBB, kerf, exact, nfpCtx)` written in Part A — which predates `PlacementContext`.
+4. **Bench is confirmatory, not a CI gate**: AC #2/#7's bench-row equivalence is verified by running the
+   bench and comparing rows to a pre-refactor run (no stored CI baseline). The exact-placement
+   characterization net is the mechanical equivalence gate and is strictly stronger (identical placements
+   ⇒ identical bench rows).
