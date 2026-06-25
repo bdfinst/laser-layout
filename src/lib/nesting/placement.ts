@@ -579,13 +579,6 @@ function resultingStrip(u: BoundingBox | null, y: number, h: number): number {
 }
 
 /**
- * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
- * step down while still collision-free, then step left while still collision-free.
- * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
- * can never leave the sheet or create an overlap. Step and iteration count are both
- * bounded so cost stays controlled (bottomLeftFill runs once per GA individual).
- */
-/**
  * The per-sheet placement environment shared by every collision/scoring helper: the placed-part
  * spatial index (`index`), the stock `sheet`, the `kerf` spacing, whether collision is `exact`,
  * and the optional NFP context. Bundles the tuple that previously recurred across six private
@@ -600,6 +593,13 @@ interface PlacementContext {
   nfpCtx?: NfpCtx;
 }
 
+/**
+ * Coarse-step bottom-left slide: from a known collision-free position, repeatedly
+ * step down while still collision-free, then step left while still collision-free.
+ * `hasCollision` enforces both the sheet boundary and part collisions, so the slide
+ * can never leave the sheet or create an overlap. Step and iteration count are both
+ * bounded so cost stays controlled (bottomLeftFill runs once per GA individual).
+ */
 function slideBottomLeft(
   poly: Polygon,
   x: number,
@@ -644,28 +644,20 @@ interface ScoredPosition {
   bl: number; // bottom-left score (tiebreak / sole criterion without NFP)
 }
 
-function tryAdjacentPositions(
-  normalizedPoly: Polygon,
+/**
+ * Generate the (cheap) candidate placement positions: legacy bbox-corner + interior-gap anchors,
+ * `exact`-gated concavity anchors (#12), per-pair NFP touching anchors (#24, P3), and — on the
+ * exact NFP path — the NFP-union feasible-region vertices (P0, #26) that include the two-contact
+ * interlocking seats no single NFP can propose. **Append order is preserved exactly**: it feeds the
+ * heap tiebreak under equal strip/bottom-left score, so reordering would change placements.
+ */
+function collectCandidatePositions(
   partBB: { width: number; height: number },
   ctx: PlacementContext,
-): PlacementResult | null {
+): { x: number; y: number }[] {
   const { index: cache, sheet, kerf, exact, nfpCtx } = ctx;
-  // Generate candidate positions (cheap): bbox corners + interior-gap anchors (gap-fill)
-  // + concavity anchors (#12) + — on the exact NFP path — full NFP touching anchors (#24,
-  // P3) that include the deep pocket seats. Validation is expensive (true-shape / NFP
-  // collision), so we cap how many positions we validate and slide rather than checking
-  // every one.
-  const bl = (x: number, y: number) => y * sheet.width + x;
-  const union = nfpCtx ? placedUnionBB(cache.items) : null;
   const positions: { x: number; y: number }[] = [];
 
-  // NFP-union feasible-region path (P0, #26). Instead of enumerating per-pair anchors — which
-  // can only ever propose vertices of an *individual* NFP — build the exact feasible region
-  // (IFP_rect − dilate(union(NFP_i), kerf)) and take its vertices. Those include the two-contact
-  // interlocking seats that are vertices of the union but of no single NFP, which the anchor
-  // enumeration provably cannot generate. Candidates are exact touching/kerf seats, so this path
-  // also skips the bottom-left slide. Falls back to the legacy anchors if the union degenerates
-  // to an empty feasible region (robustness guardrail, matching the rest of the epic).
   // Legacy anchor enumeration: bbox corners + interior-gap + concavity + per-pair NFP anchors.
   for (const cp of cache.items) {
     for (const pos of candidateAnchors(cp, partBB, kerf)) positions.push(pos);
@@ -709,10 +701,22 @@ function tryAdjacentPositions(
     for (const v of feasibleVertices(forbidden, ifp, kerf, nfpCtx.cache.dilated)) positions.push(v);
   }
 
-  // Keep only in-sheet positions. Without NFP, prefer the lowest (bottom-left) — exactly
-  // the legacy behavior. With NFP (P4), prefer the most COMPACT (smallest enclosing
-  // bbox), bottom-left as tiebreak, so a part actually chosen seats into a pocket rather
-  // than spreading along the bottom edge.
+  return positions;
+}
+
+/**
+ * Keep only in-sheet candidates and score each. Without NFP, prefer the lowest (bottom-left) —
+ * exactly the legacy behavior. With NFP (P4), score by resulting strip height (compactness) with
+ * bottom-left as tiebreak, so a chosen part seats into a pocket rather than spreading along the edge.
+ */
+function filterAndScoreInSheet(
+  positions: { x: number; y: number }[],
+  partBB: { width: number; height: number },
+  union: BoundingBox | null,
+  bl: (x: number, y: number) => number,
+  ctx: PlacementContext,
+): ScoredPosition[] {
+  const { sheet, nfpCtx } = ctx;
   const inSheet: ScoredPosition[] = [];
   for (const p of positions) {
     if (
@@ -729,12 +733,25 @@ function tryAdjacentPositions(
       bl: bl(p.x, p.y),
     });
   }
+  return inSheet;
+}
 
-  const better = (a: ScoredPosition, b: ScoredPosition) =>
-    nfpCtx ? a.strip - b.strip || a.bl - b.bl : a.bl - b.bl;
-  // Partial-sort (#42): heapify in O(N) and extract the few candidates the budget consumes in
-  // `better`-order, instead of fully sorting every in-sheet candidate up front.
-  const heap = createPositionHeap(inSheet, (a, b) => better(a, b) < 0);
+/**
+ * Pop candidates in `better`-order up to a validation budget, settling the first few toward the
+ * origin with a bottom-left slide, and return the best collision-free placement (or null). The
+ * `union`, `bl`, and `better` scorers are passed in so the heap order and best-pick order share one
+ * definition (no divergence risk).
+ */
+function validateBest(
+  heap: PositionHeap,
+  normalizedPoly: Polygon,
+  partBB: { width: number; height: number },
+  union: BoundingBox | null,
+  bl: (x: number, y: number) => number,
+  better: (a: ScoredPosition, b: ScoredPosition) => number,
+  ctx: PlacementContext,
+): ScoredPosition | null {
+  const { nfpCtx } = ctx;
 
   // The NFP path validates a larger budget — the exact phase is short, and the compact
   // seat must not be missed just because lower-y exterior candidates fill the budget.
@@ -768,6 +785,30 @@ function tryAdjacentPositions(
   // the genuinely tightest seat may have been truncated away before validation.
   recordBudgetOutcome(validated >= VALIDATE_BUDGET && heap.size > 0, !!nfpCtx);
 
+  return best;
+}
+
+function tryAdjacentPositions(
+  normalizedPoly: Polygon,
+  partBB: { width: number; height: number },
+  ctx: PlacementContext,
+): PlacementResult | null {
+  // Validation is expensive (true-shape / NFP collision), so the flow is: generate the cheap
+  // candidate anchors, score+filter to in-sheet, heapify, then validate-and-slide under a budget.
+  // `bl`/`better` are defined once here and threaded so the heap order and best-pick order can
+  // never diverge.
+  const union = ctx.nfpCtx ? placedUnionBB(ctx.index.items) : null;
+  const bl = (x: number, y: number) => y * ctx.sheet.width + x;
+  const better = (a: ScoredPosition, b: ScoredPosition) =>
+    ctx.nfpCtx ? a.strip - b.strip || a.bl - b.bl : a.bl - b.bl;
+
+  const positions = collectCandidatePositions(partBB, ctx);
+  const inSheet = filterAndScoreInSheet(positions, partBB, union, bl, ctx);
+  // Partial-sort (#42): heapify in O(N) and extract the few candidates the budget consumes in
+  // `better`-order, instead of fully sorting every in-sheet candidate up front.
+  const heap = createPositionHeap(inSheet, (a, b) => better(a, b) < 0);
+
+  const best = validateBest(heap, normalizedPoly, partBB, union, bl, better, ctx);
   return best ? { position: { x: best.x, y: best.y }, hole: null } : null;
 }
 

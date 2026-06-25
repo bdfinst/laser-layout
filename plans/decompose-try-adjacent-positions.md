@@ -303,9 +303,9 @@ All blockers cleared; Design approves; residual Acceptance items were warnings, 
 
 #### Wave 3
 
-- [ ] Slice 3: Decompose `tryAdjacentPositions` (Part A)
-  - [ ] Step 3.1: Extract `collectCandidatePositions`
-  - [ ] Step 3.2: Extract `filterAndScoreInSheet` and `validateBest`
+- [x] Slice 3: Decompose `tryAdjacentPositions` (Part A)
+  - [x] Step 3.1: Extract `collectCandidatePositions`
+  - [x] Step 3.2: Extract `filterAndScoreInSheet` and `validateBest`
 
 ### Acceptance Criteria
 
