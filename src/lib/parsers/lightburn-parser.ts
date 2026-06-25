@@ -64,12 +64,16 @@ function buildPolygonFromPrimitives(verts: Vertex[], prims: Primitive[]): Polygo
   if (prims.length === 0 || verts.length === 0) return [];
 
   const points: Point[] = [];
+  // Primitive indices come from untrusted file text — an out-of-range `from`/`to` would
+  // dereference `undefined` and throw. Guard every lookup and skip bad references.
   const firstVert = verts[prims[0].from];
+  if (!firstVert) return [];
   points.push({ x: firstVert.x, y: firstVert.y });
 
   for (const prim of prims) {
     const fromVert = verts[prim.from];
     const toVert = verts[prim.to];
+    if (!fromVert || !toVert) continue;
 
     if (prim.type === 'L') {
       points.push({ x: toVert.x, y: toVert.y });

@@ -47,6 +47,10 @@ export interface NfpCache {
    * expensive InflatePaths + simplify runs once per pair, not once per placement. Values are
    * clipper `Paths64` at the pair's local origin; the placement layer owns the clipper types,
    * so this is typed loosely to keep the cache clipper-agnostic.
+   *
+   * Intentionally **unbounded** (unlike the main NFP map's `maxEntries` LRU): it is created and
+   * `clear()`ed per sheet, so its size is capped by the number of distinct shape-pairs placed on
+   * one sheet — small and naturally bounded by the part count.
    */
   readonly dilated: Map<string, unknown>;
   clear(): void;

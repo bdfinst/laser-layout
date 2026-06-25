@@ -12,6 +12,7 @@ import {
 } from '$lib/nesting/instrumentation';
 import { getPlacedPolygons, boundingBox, polygonArea } from '$lib/geometry/polygon';
 import type { NestingConfig, Part } from '$lib/geometry/types';
+import { seedRandom } from '../test/support/seeded-random';
 
 /**
  * Nesting compaction benchmark — NOT part of `npm test`. Run with `npm run bench`.
@@ -23,16 +24,9 @@ import type { NestingConfig, Part } from '$lib/geometry/types';
  *   usedArea = sum over sheets of (stripHeight * sheetWidth)   — lower is tighter
  *   trueFill = total true part area / usedArea                  — higher is denser
  *   ms       = wall-clock per full nest (mean over seeds)
+ *
+ * RNG is the shared canonical MINSTD generator (`test/support/seeded-random`).
  */
-
-function seedRandom(seed: number) {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  Math.random = () => {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
 
 function kpis(result: NestingResult, sheetW: number) {
   let totalTrue = 0;
