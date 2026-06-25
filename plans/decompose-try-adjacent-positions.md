@@ -42,7 +42,7 @@ bbox path and the exact NFP path) before any production change.
    ships first, the helper takes `(partBB, ctx)`. Same inputs, bundled.
 4. **Bench equivalence is confirmatory, not a CI gate** — `lego-shelves[nfp=0|1]` rows are verified
    by running the bench and eyeballing the rows against a pre-refactor run; there is no stored CI
-   baseline. The exact-placement net (Slice 1) is the *mechanical* equivalence gate and is strictly
+   baseline. The exact-placement net (Slice 1) is the _mechanical_ equivalence gate and is strictly
    stronger (identical placements ⇒ identical bench rows).
 
 ## Acceptance Criteria
@@ -223,10 +223,10 @@ graph TD
 ```
 
 | Wave | Slices (parallel) |
-|------|-------------------|
-| 1 | 1 |
-| 2 | 2 |
-| 3 | 3 |
+| ---- | ----------------- |
+| 1    | 1                 |
+| 2    | 2                 |
+| 3    | 3                 |
 
 ## Complexity Classification
 
@@ -293,8 +293,8 @@ All blockers cleared; Design approves; residual Acceptance items were warnings, 
 
 #### Wave 1
 
-- [ ] Slice 1: Pin exact `bottomLeftFill` placements (characterization net)
-  - [ ] Step 1.1: Author the exact-placement characterization corpus
+- [x] Slice 1: Pin exact `bottomLeftFill` placements (characterization net)
+  - [x] Step 1.1: Author the exact-placement characterization corpus
 
 #### Wave 2
 
