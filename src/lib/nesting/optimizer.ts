@@ -1,5 +1,5 @@
 import type { Part, MaterialSheet, PlacedPart } from '$lib/geometry/types';
-import { boundingBox } from '$lib/geometry/polygon';
+import { boundingBox, getPlacedPolygons } from '$lib/geometry/polygon';
 import { bottomLeftFill } from './placement';
 import { openAreaStats, gravityMetric, remnantStats, sharedEdgeRatio } from './stats';
 import { createNfpCache, type NfpCache } from './nfp-cache';
@@ -457,13 +457,18 @@ function evaluate(
 ): number {
   const placed = bottomLeftFill(toOrderedParts(individual, parts), sheet, kerf, exact, nfpCache);
   individual.placement = placed; // cache for progress reporting
-  const stats = openAreaStats(placed, sheet);
+
+  // Transform each placed part's polygons to world space once, then share across every
+  // metric below — each part is otherwise rigid-body transformed ~4x per evaluation.
+  const polysByPart = placed.map(getPlacedPolygons);
+
+  const stats = openAreaStats(placed, sheet, polysByPart);
   const unplacedCount = parts.length - placed.length;
 
   // Remnant-aware terms (#41): nudge toward a clustered pack with one large reusable
   // offcut. Both default-weighted small so density/feasibility stay dominant.
-  const gravity = gravityMetric(placed, sheet);
-  const remnantRatio = remnantStats(placed, sheet).largestRectRatio;
+  const gravity = gravityMetric(placed, sheet, polysByPart);
+  const remnantRatio = remnantStats(placed, sheet, undefined, polysByPart).largestRectRatio;
 
   // Common-line cutting reward (#43): only computed when opted in (the shared-edge scan is
   // the most expensive metric), keeping default-path evaluations untouched.

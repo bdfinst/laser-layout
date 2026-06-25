@@ -1,6 +1,5 @@
 import type { Part, Polygon, BoundingBox } from './types';
-import { boundingBox, polygonArea } from './polygon';
-import { polygonContainsPolygon } from '$lib/nesting/nfp';
+import { boundingBox, polygonArea, polygonContainsPolygon } from './polygon';
 
 /**
  * Grid size (mm) for treating two vertices as the same point. Coincident

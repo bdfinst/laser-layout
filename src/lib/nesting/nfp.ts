@@ -1,5 +1,15 @@
 import type { Point, Polygon } from '$lib/geometry/types';
-import { boundingBox, signedArea } from '$lib/geometry/polygon';
+import {
+  boundingBox,
+  signedArea,
+  pointInPolygon,
+  polygonContainsPolygon,
+} from '$lib/geometry/polygon';
+
+// Re-exported from the geometry layer so existing `$lib/nesting/nfp` importers keep working.
+// These are pure containment primitives and live in geometry/polygon.ts to avoid a
+// geometry -> nesting dependency (e.g. geometry/grouping.ts consuming them).
+export { pointInPolygon, polygonContainsPolygon };
 
 /**
  * Compute the No-Fit Polygon (NFP) of two convex polygons.
@@ -171,31 +181,6 @@ export function insetPolygon(polygon: Polygon, distance: number): Polygon {
   if (area < 1e-6 || area >= originalArea - 1e-6) return [];
 
   return result;
-}
-
-/**
- * Check if all vertices of `inner` are inside `outer`.
- */
-export function polygonContainsPolygon(outer: Polygon, inner: Polygon): boolean {
-  return inner.every((p) => pointInPolygon(p, outer));
-}
-
-/**
- * Check if a point is inside a polygon using ray casting.
- */
-export function pointInPolygon(point: Point, polygon: Polygon): boolean {
-  let inside = false;
-  const n = polygon.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = polygon[i].x,
-      yi = polygon[i].y;
-    const xj = polygon[j].x,
-      yj = polygon[j].y;
-    if (yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }
 
 /**
