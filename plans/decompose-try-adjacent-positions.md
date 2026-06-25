@@ -298,8 +298,8 @@ All blockers cleared; Design approves; residual Acceptance items were warnings, 
 
 #### Wave 2
 
-- [ ] Slice 2: Introduce `PlacementContext` (Part B)
-  - [ ] Step 2.1: Bundle the tuple into `PlacementContext` and thread it
+- [x] Slice 2: Introduce `PlacementContext` (Part B)
+  - [x] Step 2.1: Bundle the tuple into `PlacementContext` and thread it
 
 #### Wave 3
 
