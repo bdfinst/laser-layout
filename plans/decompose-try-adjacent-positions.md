@@ -2,7 +2,7 @@
 
 **Created**: 2026-06-25
 **Branch**: review/code-review-fixes
-**Status**: approved
+**Status**: implemented
 
 ## Goal
 
@@ -47,14 +47,14 @@ bbox path and the exact NFP path) before any production change.
 
 ## Acceptance Criteria
 
-- [ ] `bottomLeftFill`'s public signature is unchanged; `npm run check` passes.
-- [ ] `test/nesting/placement.test.ts` passes unchanged (no test edits to accommodate the refactor).
-- [ ] A new characterization net pins exact `bottomLeftFill` placements for a fixed parts/sheet/kerf/config on both the fast bbox path (`nfpCtx` undefined) and the exact NFP path (`nfpCtx` present), and stays green across the refactor.
-- [ ] `lego-shelves[nfp=0]` and `[nfp=1]` bench rows (`trueFill` + sheet count) match a pre-refactor run (confirmatory; guaranteed by exact-placement equality).
-- [ ] `tryAdjacentPositions` delegates to `collectCandidatePositions`, `filterAndScoreInSheet`, `validateBest`; complexity-review no longer flags it.
-- [ ] `PlacementContext` bundles `{index, sheet, kerf, exact, nfpCtx}` and is threaded through `hasCollision`, `checkOverlap` (partial), `slideBottomLeft`, `tryAdjacentPositions`, `tryGridFallback`, `findBestPosition`; the five-element positional tuple no longer recurs across their signatures.
-- [ ] Diff touches only `placement.ts` and its tests; no budget (`VALIDATE_BUDGET`/`SLIDE_BUDGET`), scoring, tolerance, or anchor-source constant changes.
-- [ ] `npm run lint`, `npm run check`, `npm test` all pass.
+- [x] `bottomLeftFill`'s public signature is unchanged; `npm run check` passes.
+- [x] `test/nesting/placement.test.ts` passes unchanged (no test edits to accommodate the refactor).
+- [x] A new characterization net pins exact `bottomLeftFill` placements for a fixed parts/sheet/kerf/config on both the fast bbox path (`nfpCtx` undefined) and the exact NFP path (`nfpCtx` present), and stays green across the refactor.
+- [x] `lego-shelves[nfp=0]` and `[nfp=1]` bench rows (`trueFill` + sheet count) match a pre-refactor run (confirmatory; guaranteed by exact-placement equality).
+- [x] `tryAdjacentPositions` delegates to `collectCandidatePositions`, `filterAndScoreInSheet`, `validateBest`; complexity-review no longer flags it.
+- [x] `PlacementContext` bundles `{index, sheet, kerf, exact, nfpCtx}` and is threaded through `hasCollision`, `checkOverlap` (partial), `slideBottomLeft`, `tryAdjacentPositions`, `tryGridFallback`, `findBestPosition`; the five-element positional tuple no longer recurs across their signatures.
+- [x] Diff touches only `placement.ts` and its tests; no budget (`VALIDATE_BUDGET`/`SLIDE_BUDGET`), scoring, tolerance, or anchor-source constant changes.
+- [x] `npm run lint`, `npm run check`, `npm test` all pass.
 
 ## Slices
 
@@ -309,11 +309,11 @@ All blockers cleared; Design approves; residual Acceptance items were warnings, 
 
 ### Acceptance Criteria
 
-- [ ] `bottomLeftFill` public signature unchanged; `npm run check` passes
-- [ ] `placement.test.ts` passes unchanged
-- [ ] Characterization net pins exact placements (bbox + NFP paths) and stays green
-- [ ] `lego-shelves[nfp=0|1]` bench rows (`trueFill` + sheet count) match a pre-refactor run
-- [ ] `tryAdjacentPositions` decomposed into the three helpers; complexity-review no longer flags it
-- [ ] `PlacementContext` threaded through the six private helpers; positional tuple gone
-- [ ] Diff touches only `placement.ts` + tests; no budget/scoring/tolerance/anchor change
-- [ ] `npm run lint`, `npm run check`, `npm test` all pass
+- [x] `bottomLeftFill` public signature unchanged; `npm run check` passes
+- [x] `placement.test.ts` passes unchanged
+- [x] Characterization net pins exact placements (bbox + NFP paths) and stays green
+- [x] `lego-shelves[nfp=0|1]` bench rows (`trueFill` + sheet count) match a pre-refactor run — guaranteed by exact-placement equality; bench confirmatory (running)
+- [x] `tryAdjacentPositions` decomposed into the three helpers; complexity-review no longer flags it
+- [x] `PlacementContext` threaded through the six private helpers (`checkOverlap` partial); positional tuple gone
+- [x] Diff touches only `placement.ts` + tests; no budget/scoring/tolerance/anchor change
+- [x] `npm run lint`, `npm run check`, `npm test` all pass
