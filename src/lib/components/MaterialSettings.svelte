@@ -5,8 +5,8 @@
   import { DEFAULT_NEST_BUDGET_MS } from '$lib/nesting/engine';
 
   function onToleranceChange(e: Event) {
-    const val = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(val)) projectStore.setMatchTolerance(val / 100);
+    const tolerancePercent = parseFloat((e.target as HTMLInputElement).value);
+    if (!isNaN(tolerancePercent)) projectStore.setMatchTolerance(tolerancePercent / 100);
   }
 
   function generations(): number {
@@ -14,8 +14,9 @@
   }
 
   function onGenerationsChange(e: Event) {
-    const val = parseInt((e.target as HTMLInputElement).value, 10);
-    if (!isNaN(val) && val > 0) projectStore.setGenerations(val);
+    const generationCount = parseInt((e.target as HTMLInputElement).value, 10);
+    if (!isNaN(generationCount) && generationCount > 0)
+      projectStore.setGenerations(generationCount);
   }
 
   function timeBudgetSeconds(): number {
@@ -23,8 +24,8 @@
   }
 
   function onTimeBudgetChange(e: Event) {
-    const val = parseFloat((e.target as HTMLInputElement).value);
-    if (!isNaN(val) && val > 0) projectStore.setTimeBudgetSeconds(val);
+    const seconds = parseFloat((e.target as HTMLInputElement).value);
+    if (!isNaN(seconds) && seconds > 0) projectStore.setTimeBudgetSeconds(seconds);
   }
 
   function maximizeDensity(): boolean {

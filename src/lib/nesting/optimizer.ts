@@ -466,9 +466,15 @@ function evaluate(
   const unplacedCount = parts.length - placed.length;
 
   // Remnant-aware terms (#41): nudge toward a clustered pack with one large reusable
-  // offcut. Both default-weighted small so density/feasibility stay dominant.
-  const gravity = gravityMetric(placed, sheet, polysByPart);
-  const remnantRatio = remnantStats(placed, sheet, undefined, polysByPart).largestRectRatio;
+  // offcut. Both default-weighted small so density/feasibility stay dominant. Skipped when
+  // their weight is 0 (mirrors the commonLineWeight guard) — fitnessFromStats treats an
+  // omitted metric as exactly 0, so a zero-weight term costs nothing and computes nothing.
+  const gravity =
+    (gravityWeight ?? GRAVITY_WEIGHT) === 0 ? undefined : gravityMetric(placed, sheet, polysByPart);
+  const remnantRatio =
+    (remnantWeight ?? REMNANT_WEIGHT) === 0
+      ? undefined
+      : remnantStats(placed, sheet, undefined, polysByPart).largestRectRatio;
 
   // Common-line cutting reward (#43): only computed when opted in (the shared-edge scan is
   // the most expensive metric), keeping default-path evaluations untouched.

@@ -20,12 +20,18 @@
       const name = file.name;
       let parts;
 
-      if (name.endsWith('.svg')) {
-        parts = parseSVG(text);
-      } else if (name.endsWith('.lbrn') || name.endsWith('.lbrn2')) {
-        parts = parseLightBurn(text);
-      } else {
-        alert('Unsupported file format. Please use .svg, .lbrn, or .lbrn2');
+      try {
+        if (name.endsWith('.svg')) {
+          parts = parseSVG(text);
+        } else if (name.endsWith('.lbrn') || name.endsWith('.lbrn2')) {
+          parts = parseLightBurn(text);
+        } else {
+          alert('Unsupported file format. Please use .svg, .lbrn, or .lbrn2');
+          return;
+        }
+      } catch {
+        // A malformed/crafted file should surface a friendly error, not an unhandled throw.
+        alert('Could not read this file — it may be malformed or corrupted.');
         return;
       }
 

@@ -38,19 +38,13 @@ describe('density-aware nesting — effectiveness and non-regression (capstone)'
     // (GA trajectory varies with seed and with heuristic seeding). Pre-change baseline
     // (strip-height fitness, no gap-fill) averages ~0.80 on this case; the gap-filling
     // build stays comfortably above 0.85.
-    const orig = Math.random;
     const seeds = [42, 7, 123, 999, 2024];
     let sum = 0;
     for (const seed of seeds) {
-      let s = seed % 2147483647;
-      if (s <= 0) s += 2147483646;
-      Math.random = () => {
-        s = (s * 16807) % 2147483647;
-        return (s - 1) / 2147483646;
-      };
+      seedRandom(seed);
       sum += nestParts({ parts, quantities, config }).sheets[0].utilization;
     }
-    Math.random = orig;
+    // afterEach restoreRandom() resets Math.random — no manual capture/restore needed.
     const mean = sum / seeds.length;
     expect(mean).toBeGreaterThanOrEqual(0.85);
   });

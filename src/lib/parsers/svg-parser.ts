@@ -52,7 +52,11 @@ function tokenizePath(d: string): PathToken[] {
       currentCommand = match[1];
       currentArgs = [];
     } else if (match[2]) {
-      currentArgs.push(parseFloat(match[2]));
+      // A crafted token like `1e999` parses to Infinity; reject non-finite coordinates so the
+      // failure is surfaced (FileUpload catches it) rather than polluting downstream geometry.
+      const n = parseFloat(match[2]);
+      if (!Number.isFinite(n)) throw new Error(`Non-finite coordinate in path data: ${match[2]}`);
+      currentArgs.push(n);
     }
   }
   if (currentCommand) {
