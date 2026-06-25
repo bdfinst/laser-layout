@@ -271,6 +271,21 @@ function polygonSlideDistance(
 
 type SlideVector = Point;
 
+type Contact = { type: 0 | 1 | 2; a: number; b: number };
+
+/**
+ * The moving body's state as B is orbited around A. `refx/refy` track the locus of B's
+ * reference vertex (B[0]); `offx/offy` accumulate the offset from B's original frame; `Bo`
+ * is B in world coordinates at the current offset. All advance together each iteration.
+ */
+interface OrbitCursor {
+  refx: number;
+  refy: number;
+  offx: number;
+  offy: number;
+  Bo: Polygon;
+}
+
 /** Strip a duplicated closing vertex and orient CCW so the orbit winds consistently. */
 function prepare(poly: Polygon): Polygon {
   let p = poly;
@@ -279,6 +294,29 @@ function prepare(poly: Polygon): Polygon {
     p = p.slice(0, last);
   }
   return ensureCCW(p);
+}
+
+/**
+ * Phase 1: every current touching contact between A and the orbiting body `Bo` — a
+ * coincident vertex pair (type 0), an A-edge touching a B-vertex (type 1), or a B-edge
+ * touching an A-vertex (type 2). `Bo` has the same length as the original B.
+ */
+function collectContacts(A: Polygon, Bo: Polygon): Contact[] {
+  const touching: Contact[] = [];
+  for (let i = 0; i < A.length; i++) {
+    const nexti = (i + 1) % A.length;
+    for (let j = 0; j < Bo.length; j++) {
+      const nextj = (j + 1) % Bo.length;
+      if (almostEqual(A[i].x, Bo[j].x) && almostEqual(A[i].y, Bo[j].y)) {
+        touching.push({ type: 0, a: i, b: j });
+      } else if (onSegment(A[i], A[nexti], Bo[j])) {
+        touching.push({ type: 1, a: nexti, b: j });
+      } else if (onSegment(Bo[j], Bo[nextj], A[i])) {
+        touching.push({ type: 2, a: i, b: nextj });
+      }
+    }
+  }
+  return touching;
 }
 
 /**
@@ -302,37 +340,23 @@ export function orbitingNFP(staticPoly: Polygon, orbitingPoly: Polygon): Polygon
   let maxBi = 0;
   for (let i = 1; i < B.length; i++) if (B[i].y > B[maxBi].y) maxBi = i;
 
-  let offx = A[minAi].x - B[maxBi].x;
-  let offy = A[minAi].y - B[maxBi].y;
-  // B in world coordinates at the current offset.
-  let Bo: Polygon = B.map((p) => ({ x: p.x + offx, y: p.y + offy }));
+  const offx = A[minAi].x - B[maxBi].x;
+  const offy = A[minAi].y - B[maxBi].y;
+  // B in world coordinates at the current offset, and the reference-vertex locus (B[0]).
+  const Bo0: Polygon = B.map((p) => ({ x: p.x + offx, y: p.y + offy }));
+  const cur: OrbitCursor = { refx: Bo0[0].x, refy: Bo0[0].y, offx, offy, Bo: Bo0 };
 
   // NFP is the locus of B's reference vertex (B[0]); convert to offsets at the end.
-  let refx = Bo[0].x;
-  let refy = Bo[0].y;
-  const startx = refx;
-  const starty = refy;
-  const trace: Point[] = [{ x: refx, y: refy }];
+  const startx = cur.refx;
+  const starty = cur.refy;
+  const trace: Point[] = [{ x: cur.refx, y: cur.refy }];
 
   let prev: SlideVector | null = null;
   const maxIter = 10 * (A.length + B.length);
 
   for (let counter = 0; counter < maxIter; counter++) {
     // 1. Collect every current contact between A and B.
-    const touching: { type: 0 | 1 | 2; a: number; b: number }[] = [];
-    for (let i = 0; i < A.length; i++) {
-      const nexti = (i + 1) % A.length;
-      for (let j = 0; j < B.length; j++) {
-        const nextj = (j + 1) % B.length;
-        if (almostEqual(A[i].x, Bo[j].x) && almostEqual(A[i].y, Bo[j].y)) {
-          touching.push({ type: 0, a: i, b: j });
-        } else if (onSegment(A[i], A[nexti], Bo[j])) {
-          touching.push({ type: 1, a: nexti, b: j });
-        } else if (onSegment(Bo[j], Bo[nextj], A[i])) {
-          touching.push({ type: 2, a: i, b: nextj });
-        }
-      }
-    }
+    const touching = collectContacts(A, cur.Bo);
 
     // 2. Each contact contributes candidate slide directions.
     const vectors: SlideVector[] = [];
@@ -340,9 +364,9 @@ export function orbitingNFP(staticPoly: Polygon, orbitingPoly: Polygon): Polygon
       const prevA = A[(t.a - 1 + A.length) % A.length];
       const vA = A[t.a];
       const nextA = A[(t.a + 1) % A.length];
-      const prevB = Bo[(t.b - 1 + B.length) % B.length];
-      const vB = Bo[t.b];
-      const nextB = Bo[(t.b + 1) % B.length];
+      const prevB = cur.Bo[(t.b - 1 + B.length) % B.length];
+      const vB = cur.Bo[t.b];
+      const nextB = cur.Bo[(t.b + 1) % B.length];
 
       if (t.type === 0) {
         vectors.push({ x: prevA.x - vA.x, y: prevA.y - vA.y });
@@ -370,7 +394,7 @@ export function orbitingNFP(staticPoly: Polygon, orbitingPoly: Polygon): Polygon
         if (Math.abs(u.y * pu.x - u.x * pu.y) < 1e-4) continue; // anti-parallel: came from here
       }
 
-      let d = polygonSlideDistance(A, Bo, v, true);
+      let d = polygonSlideDistance(A, cur.Bo, v, true);
       const vlen2 = v.x * v.x + v.y * v.y;
       if (d === null || d * d > vlen2) d = Math.sqrt(vlen2);
 
@@ -396,25 +420,25 @@ export function orbitingNFP(staticPoly: Polygon, orbitingPoly: Polygon): Polygon
       ty *= scale;
     }
 
-    refx += tx;
-    refy += ty;
+    cur.refx += tx;
+    cur.refy += ty;
 
-    if (almostEqual(refx, startx) && almostEqual(refy, starty)) break; // closed the loop
+    if (almostEqual(cur.refx, startx) && almostEqual(cur.refy, starty)) break; // closed the loop
 
     // Guard against a non-start re-visit (can happen with shared horizontal edges).
     let looped = false;
     for (let i = 0; i < trace.length - 1; i++) {
-      if (almostEqual(refx, trace[i].x) && almostEqual(refy, trace[i].y)) {
+      if (almostEqual(cur.refx, trace[i].x) && almostEqual(cur.refy, trace[i].y)) {
         looped = true;
         break;
       }
     }
     if (looped) break;
 
-    trace.push({ x: refx, y: refy });
-    offx += tx;
-    offy += ty;
-    Bo = Bo.map((p) => ({ x: p.x + tx, y: p.y + ty }));
+    trace.push({ x: cur.refx, y: cur.refy });
+    cur.offx += tx;
+    cur.offy += ty;
+    cur.Bo = cur.Bo.map((p) => ({ x: p.x + tx, y: p.y + ty }));
   }
 
   if (trace.length < 3) return null;
