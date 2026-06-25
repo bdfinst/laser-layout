@@ -5,25 +5,13 @@ import {
   type NestingResult,
   type NestingProgress,
 } from './engine';
+import { rehydrateQuantities } from './worker-io';
 
 export type WorkerMessage = { type: 'start'; input: NestingInput };
 
-/**
- * Rehydrate the part-quantities map from its structured-clone-serialized form. `postMessage`
- * may deliver the `Map` as a `Map`, an array of `[id, count]` pairs, or a plain object depending
- * on the browser, so accept all three wire forms (not `NestingInput['quantities']`, which is just
- * `Map`). String values are coerced via `Number(...)` exactly as before — a non-numeric string
- * therefore yields `NaN`. A `Map` input is returned as a copy, never the original reference.
- */
-export function rehydrateQuantities(
-  raw: Map<string, number> | readonly [string, number][] | Record<string, number | string>,
-): Map<string, number> {
-  if (raw instanceof Map) return new Map(raw);
-  if (Array.isArray(raw)) return new Map(raw);
-  return new Map(
-    Object.entries(raw as Record<string, number | string>).map(([k, v]) => [k, Number(v)]),
-  );
-}
+// Re-exported for existing importers (the worker driver tests) — the wire-form contract now lives
+// in the side-effect-free `worker-io` module alongside its serializer counterpart.
+export { rehydrateQuantities };
 
 export type WorkerResponse =
   | {

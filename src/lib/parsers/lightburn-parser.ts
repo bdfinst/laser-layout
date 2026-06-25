@@ -8,6 +8,7 @@ import {
 } from '$lib/geometry/affine';
 import { dropClosingVertex } from '$lib/geometry/polygon';
 import { CURVE_SEGMENTS, CIRCLE_SEGMENTS, MAX_DEPTH, MAX_FILE_SIZE } from './constants';
+import { pushPart } from './part-builder';
 
 function parseXForm(el: Element): AffineMatrix {
   const xformEl = el.querySelector(':scope > XForm');
@@ -231,13 +232,7 @@ function processShape(
   }
 
   if (polygons.length > 0) {
-    parts.push({
-      id: `part-${counter.value}`,
-      name: `${type}-${counter.value}`,
-      polygons,
-      sourceIndex: counter.value,
-    });
-    counter.value++;
+    pushPart(parts, polygons, `${type}-${counter.value}`, counter);
   }
 }
 

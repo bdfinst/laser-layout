@@ -11,6 +11,7 @@
     type WorkerLike,
   } from '$lib/nesting/nesting-coordinator';
   import { resolveTimeBudget } from '$lib/nesting/engine';
+  import { serializeNestingInput } from '$lib/nesting/worker-io';
 
   let exportFormat = $state<'svg' | 'lightburn'>('lightburn');
   let nest: CoordinatorHandle | null = null;
@@ -42,14 +43,7 @@
         type: 'module',
       }) as unknown as WorkerLike;
 
-    // Deep-clone to strip Svelte $state proxies (not structured-cloneable)
-    const serializedInput = JSON.parse(
-      JSON.stringify({
-        parts,
-        quantities: Object.fromEntries(quantities),
-        config,
-      }),
-    );
+    const serializedInput = serializeNestingInput({ parts, quantities, config });
 
     nest = runParallelNest(
       serializedInput,
