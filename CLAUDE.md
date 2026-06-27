@@ -17,9 +17,12 @@ Laser Layout is a SvelteKit web app that optimizes 2D part nesting for laser cut
 - `npm run test:e2e` (`npx playwright test`) — e2e tests (builds app, serves on :4173)
 - `npm run bench` — nesting compaction benchmark (`bench/nesting-compaction.bench.ts`)
 
-## Pre-commit Hook
+## Git Hooks (Husky)
 
-Husky runs on every commit: lint-staged (ESLint + `prettier --write` on staged `.ts`/`.svelte`, and `prettier --write` on staged `.js`/`.json`/`.css`/`.md`), then `npm run check` (type checking) and `npm test` (all unit tests). All must pass.
+- **pre-commit** (`.husky/pre-commit`): lint-staged (ESLint + `prettier --write` on staged `.ts`/`.svelte`, and `prettier --write` on staged `.js`/`.json`/`.css`/`.md`), then `npm run check` (type checking) and `npm test` (all unit tests). Kept fast — no e2e.
+- **pre-push** (`.husky/pre-push`): `npm run test:all` = the full suite (`npm test` unit + `npm run test:e2e`). e2e builds and serves the app so it is too slow for every commit, but it must pass before code reaches CI — this gate catches breakage (e.g. UI/DOM changes that desync e2e selectors) locally instead of in CI.
+
+All hook steps must pass.
 
 ## Architecture
 
