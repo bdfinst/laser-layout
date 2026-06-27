@@ -20,6 +20,8 @@ function result(unplaced: number, sheets: number, stripHeight = 10): NestingResu
       placed: [],
       stripHeight,
       utilization: 0,
+      sheetWidth: 100,
+      sheetHeight: 100,
     })),
     unplaced: Array.from({ length: unplaced }, (_, i) => ({
       id: `u${i}`,

@@ -11,6 +11,7 @@ import {
   sheetLowerBound,
   partitionByArea,
   packIntoKSheets,
+  selectSheetForNextOpen,
   type NestingResult,
 } from '$lib/nesting/engine';
 import { optimizeIterative } from '$lib/nesting/optimizer';
@@ -18,7 +19,14 @@ import { computeSheetStats, openAreaStats, sharedEdgeLength } from '$lib/nesting
 import { bottomLeftFill } from '$lib/nesting/placement';
 import { makeRect as makePart } from '../support/parts';
 import { seedRandom, restoreRandom } from '../support/seeded-random';
-import type { NestingConfig } from '$lib/geometry/types';
+import { availableSheets, type NestingConfig } from '$lib/geometry/types';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { parseLightBurn } from '$lib/parsers/lightburn-parser';
+import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
+import { deduplicateParts } from '$lib/geometry/dedup';
+import { getPlacedPolygons } from '$lib/geometry/polygon';
+import { polygonsInterpenetrate } from '$lib/nesting/nfp';
 
 const fastConfig: NestingConfig = {
   sheet: { width: 100, height: 100 },
@@ -380,6 +388,8 @@ describe('multi-start helpers', () => {
         placed: [],
         stripHeight: s.stripHeight,
         utilization: 0,
+        sheetWidth,
+        sheetHeight: 100,
       })),
       unplaced: Array.from({ length: unplaced }, (_, i) => makePart(`u${i}`, 1, 1)),
       sheetWidth,
@@ -487,5 +497,856 @@ describe('multi-start helpers', () => {
       const res = nestPartsMultiStart(input, { timeBudgetMs: 0, now: () => 1, maxStarts: 99 });
       expect(res.totalPlaced).toBe(1);
     });
+  });
+});
+
+describe('least-committed-area objective (Slice 2)', () => {
+  // Build a result with explicit per-sheet dimensions + strip heights so the comparator can be
+  // exercised deterministically without running the GA.
+  function makeResult(opts: {
+    unplaced?: number;
+    sheets: { stripHeight: number; w: number; h: number }[];
+  }): NestingResult {
+    const sheets = opts.sheets.map((s, i) => ({
+      sheetIndex: i,
+      placed: [],
+      stripHeight: s.stripHeight,
+      utilization: 0,
+      sheetWidth: s.w,
+      sheetHeight: s.h,
+    }));
+    return {
+      sheets,
+      unplaced: Array.from({ length: opts.unplaced ?? 0 }, (_, i) => makePart(`u${i}`, 1, 1)),
+      sheetWidth: sheets[0]?.sheetWidth ?? 0,
+      sheetHeight: sheets[0]?.sheetHeight ?? 0,
+      totalPlaced: 0,
+    };
+  }
+
+  it('prefers lower committed area even when it uses more sheets', () => {
+    // A: two 50×50 sheets ⇒ committed 5000 over 2 sheets.
+    // B: one 100×100 sheet ⇒ committed 10000 over 1 sheet.
+    const a = makeResult({
+      sheets: [
+        { stripHeight: 50, w: 50, h: 50 },
+        { stripHeight: 50, w: 50, h: 50 },
+      ],
+    });
+    const b = makeResult({ sheets: [{ stripHeight: 100, w: 100, h: 100 }] });
+    expect(isBetterResult(a, b)).toBe(true);
+    expect(isBetterResult(b, a)).toBe(false);
+  });
+
+  it('breaks an equal-committed-area tie by fewer sheets', () => {
+    // A: one 100×100 ⇒ committed 10000, 1 sheet.
+    // B: two 100×50 ⇒ committed 10000, 2 sheets.
+    const a = makeResult({ sheets: [{ stripHeight: 100, w: 100, h: 100 }] });
+    const b = makeResult({
+      sheets: [
+        { stripHeight: 50, w: 100, h: 50 },
+        { stripHeight: 50, w: 100, h: 50 },
+      ],
+    });
+    expect(isBetterResult(a, b)).toBe(true);
+    expect(isBetterResult(b, a)).toBe(false);
+  });
+
+  it('breaks an equal-area equal-count tie by less total strip area', () => {
+    // Same committed area (10000) and sheet count (1); A packs into less strip height.
+    const a = makeResult({ sheets: [{ stripHeight: 30, w: 100, h: 100 }] });
+    const b = makeResult({ sheets: [{ stripHeight: 60, w: 100, h: 100 }] });
+    expect(isBetterResult(a, b)).toBe(true);
+    expect(isBetterResult(b, a)).toBe(false);
+  });
+
+  it('strip tie-break uses each sheet own width, not the result-level default', () => {
+    // Two mixed-size sheets, equal committed area (8000+8000 vs 8000+8000) and equal count.
+    // A's slack lands on the wide sheet (low strip) where B's lands on the narrow one — the
+    // total strip AREA must be computed per-sheet, so A (less strip area) wins.
+    const a = makeResult({
+      sheets: [
+        { stripHeight: 10, w: 200, h: 40 }, // strip area 2000
+        { stripHeight: 40, w: 50, h: 160 }, // strip area 2000
+      ],
+    });
+    const b = makeResult({
+      sheets: [
+        { stripHeight: 40, w: 200, h: 40 }, // strip area 8000
+        { stripHeight: 10, w: 50, h: 160 }, // strip area 500
+      ],
+    });
+    // committed identical (8000+8000 both); count identical (2). A strip area 4000 < B 8500.
+    expect(isBetterResult(a, b)).toBe(true);
+    expect(isBetterResult(b, a)).toBe(false);
+  });
+
+  it('matches the prior feasibility→fewer-sheets→density ordering for homogeneous jobs', () => {
+    // Reference: the comparator BEFORE Slice 2 (feasibility → fewer sheets → strip density,
+    // where density summed stripHeight × the result-level width).
+    function priorIsBetter(a: NestingResult, b: NestingResult): boolean {
+      if (a.unplaced.length !== b.unplaced.length) return a.unplaced.length < b.unplaced.length;
+      if (a.sheets.length !== b.sheets.length) return a.sheets.length < b.sheets.length;
+      const ua = a.sheets.reduce((s, x) => s + x.stripHeight * a.sheetWidth, 0);
+      const ub = b.sheets.reduce((s, x) => s + x.stripHeight * b.sheetWidth, 0);
+      return ua < ub;
+    }
+
+    const W = 100;
+    const H = 100;
+    const hom = (unplaced: number, strips: number[]) =>
+      makeResult({ unplaced, sheets: strips.map((stripHeight) => ({ stripHeight, w: W, h: H })) });
+
+    // A spread of homogeneous results varying unplaced, sheet count, and strip height.
+    const samples = [
+      hom(0, [50]),
+      hom(0, [30]),
+      hom(0, [50, 50]),
+      hom(0, [10, 10]),
+      hom(1, [10]),
+      hom(2, [5]),
+      hom(0, [99]),
+    ];
+
+    for (const a of samples) {
+      for (const b of samples) {
+        if (a === b) continue;
+        expect(isBetterResult(a, b)).toBe(priorIsBetter(a, b));
+      }
+    }
+  });
+});
+
+describe('availableSheets (sheet-list normalizer)', () => {
+  it('normalizes a single configured sheet to a one-element list', () => {
+    const cfg: NestingConfig = { ...fastConfig, sheet: { width: 600, height: 350 } };
+    expect(availableSheets(cfg)).toEqual([{ width: 600, height: 350 }]);
+  });
+
+  it('returns the sheets list and lets it win over the single sheet', () => {
+    const cfg: NestingConfig = {
+      ...fastConfig,
+      sheet: { width: 600, height: 350 },
+      sheets: [{ width: 500, height: 400 }],
+    };
+    expect(availableSheets(cfg)).toEqual([{ width: 500, height: 400 }]);
+  });
+
+  it('throws when the sheets list is present but empty', () => {
+    const cfg: NestingConfig = { ...fastConfig, sheets: [] };
+    expect(() => availableSheets(cfg)).toThrow(/no sheet sizes/i);
+  });
+
+  it('round-trips maxCount: omitted stays undefined, provided is returned untouched', () => {
+    const omitted: NestingConfig = { ...fastConfig, sheets: [{ width: 500, height: 400 }] };
+    expect(availableSheets(omitted)[0].maxCount).toBeUndefined();
+
+    const provided: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 500, height: 400, maxCount: 3 }],
+    };
+    expect(availableSheets(provided)[0].maxCount).toBe(3);
+  });
+});
+
+describe('sheet-list config at the engine boundary', () => {
+  it('rejects an empty sheet-size list from nestParts and opens no sheets', () => {
+    const input = {
+      parts: [makePart('a', 20, 20)],
+      quantities: new Map([['a', 1]]),
+      config: { ...fastConfig, sheets: [] },
+    };
+    expect(() => nestParts(input)).toThrow(/no sheet sizes/i);
+  });
+
+  it('rejects an empty sheet-size list from the iterative generator', () => {
+    const gen = nestPartsIterative({
+      parts: [makePart('a', 20, 20)],
+      quantities: new Map([['a', 1]]),
+      config: { ...fastConfig, sheets: [] },
+    });
+    expect(() => gen.next()).toThrow(/no sheet sizes/i);
+  });
+
+  it('nests from the sheets list (not the single sheet), picking the least-committed size', () => {
+    // sheet (600×350) is present but the sheets list wins. Both listed sizes hold the parts, so
+    // the engine opens the least-committed-area size (500×400 = 200000 < 700×300 = 210000) —
+    // per-sheet dims and the top-level default both reflect the chosen size (Slice 3).
+    const input = {
+      parts: [makePart('a', 20, 20), makePart('b', 20, 20)],
+      quantities: new Map([
+        ['a', 1],
+        ['b', 1],
+      ]),
+      config: {
+        ...fastConfig,
+        sheet: { width: 600, height: 350 },
+        sheets: [
+          { width: 700, height: 300 },
+          { width: 500, height: 400 },
+        ],
+      },
+    };
+    const res = nestParts(input);
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets.length).toBeGreaterThan(0);
+    expect(res.sheets[0].sheetWidth).toBe(500);
+    expect(res.sheets[0].sheetHeight).toBe(400);
+    expect(res.sheetWidth).toBe(500);
+  });
+
+  it('rejects an empty sheet-size list from nestPartsMultiStart', () => {
+    const input = {
+      parts: [makePart('a', 20, 20)],
+      quantities: new Map([['a', 1]]),
+      config: { ...fastConfig, sheets: [] },
+    };
+    expect(() => nestPartsMultiStart(input)).toThrow(/no sheet sizes/i);
+  });
+});
+
+describe('per-sheet result dimensions', () => {
+  const config: NestingConfig = { ...fastConfig, sheet: { width: 600, height: 350 } };
+
+  it('still nests a single configured size onto one sheet with nothing unplaced', () => {
+    const input = {
+      parts: [makePart('a', 20, 20), makePart('b', 20, 20)],
+      quantities: new Map([
+        ['a', 1],
+        ['b', 1],
+      ]),
+      config,
+    };
+    const res = nestParts(input);
+    expect(res.sheets).toHaveLength(1);
+    expect(res.unplaced).toHaveLength(0);
+  });
+
+  it('records the size used on each SheetResult', () => {
+    const input = {
+      parts: [makePart('a', 20, 20)],
+      quantities: new Map([['a', 1]]),
+      config,
+    };
+    const res = nestParts(input);
+    expect(res.sheets[0].sheetWidth).toBe(600);
+    expect(res.sheets[0].sheetHeight).toBe(350);
+  });
+
+  it('defaults the top-level result dimensions to the first sheet size', () => {
+    const input = {
+      parts: [makePart('a', 20, 20)],
+      quantities: new Map([['a', 1]]),
+      config,
+    };
+    const res = nestParts(input);
+    expect(res.sheetWidth).toBe(600);
+    expect(res.sheetHeight).toBe(350);
+  });
+});
+
+const committedAreaOf = (res: NestingResult): number =>
+  res.sheets.reduce((sum, s) => sum + s.sheetWidth * s.sheetHeight, 0);
+
+const sizeKeys = (res: NestingResult): Set<string> =>
+  new Set(res.sheets.map((s) => `${s.sheetWidth}x${s.sheetHeight}`));
+
+const sizeCounts = (res: NestingResult): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const s of res.sheets) {
+    const key = `${s.sheetWidth}x${s.sheetHeight}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+};
+
+describe('selectSheetForNextOpen (Slice 3.1)', () => {
+  const small = { width: 50, height: 50 };
+  const large = { width: 100, height: 100 };
+
+  it('picks the size that places more parts (stubbed evaluate)', () => {
+    const evals = new Map([
+      [small, { committedArea: 2500, placedCount: 1 }],
+      [large, { committedArea: 10000, placedCount: 3 }],
+    ]);
+    const chosen = selectSheetForNextOpen([], [small, large], (s) => evals.get(s)!);
+    expect(chosen).toBe(large);
+  });
+
+  it('breaks an equal-placed tie toward the least committed area (stubbed evaluate)', () => {
+    const evals = new Map([
+      [small, { committedArea: 2500, placedCount: 2 }],
+      [large, { committedArea: 10000, placedCount: 2 }],
+    ]);
+    const chosen = selectSheetForNextOpen([], [small, large], (s) => evals.get(s)!);
+    expect(chosen).toBe(small);
+  });
+
+  it('returns null when no size can hold the largest remaining part', () => {
+    const part = makePart('big', 80, 80);
+    const chosen = selectSheetForNextOpen([part], [small], () => ({
+      committedArea: 2500,
+      placedCount: 1,
+    }));
+    expect(chosen).toBeNull();
+  });
+
+  it('discards sizes too small for the largest part before scoring survivors', () => {
+    const part = makePart('mid', 70, 70); // fits large (100) but not small (50)
+    const chosen = selectSheetForNextOpen([part], [small, large], () => ({
+      committedArea: 1,
+      placedCount: 99,
+    }));
+    expect(chosen).toBe(large);
+  });
+});
+
+describe('engine mixes sheet sizes per opened sheet (Slice 3.1)', () => {
+  it('uses both sizes when each part fits only one of them, placing everything', () => {
+    // small 100×100 holds the 90×90 squares but not the 180×40 bars; large 200×50 holds the
+    // bars but not the squares — placing every part requires sheets of BOTH sizes.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 100, height: 100 },
+        { width: 200, height: 50 },
+      ],
+    };
+    const parts = [
+      makePart('sq1', 90, 90),
+      makePart('sq2', 90, 90),
+      makePart('bar1', 180, 40),
+      makePart('bar2', 180, 40),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.unplaced).toHaveLength(0);
+    expect(sizeKeys(res).has('100x100')).toBe(true);
+    expect(sizeKeys(res).has('200x50')).toBe(true);
+  });
+
+  it('mixes sizes for less committed area than either feasible single-size baseline', () => {
+    // Seven full-width 100×33 strips (1-D stacking, GA-deterministic). small 100×100 holds 3,
+    // large 100×175 holds 5. Greedy mixing fills one large (5) then one small (2) = 27500, which
+    // beats large-only (two large = 35000) and small-only (three small = 30000).
+    const small = { width: 100, height: 100 };
+    const large = { width: 100, height: 175 };
+    const parts = Array.from({ length: 7 }, (_, i) => makePart(`p${i}`, 100, 33));
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const mixed = nestParts({
+      parts,
+      quantities: q,
+      config: { ...fastConfig, sheets: [small, large] },
+    });
+    const largeOnly = nestParts({
+      parts,
+      quantities: q,
+      config: { ...fastConfig, sheets: [large] },
+    });
+    const smallOnly = nestParts({
+      parts,
+      quantities: q,
+      config: { ...fastConfig, sheets: [small] },
+    });
+
+    expect(mixed.unplaced).toHaveLength(0);
+    expect(largeOnly.unplaced).toHaveLength(0);
+    expect(smallOnly.unplaced).toHaveLength(0);
+    expect(sizeKeys(mixed).has('100x175')).toBe(true);
+    expect(sizeKeys(mixed).has('100x100')).toBe(true);
+    expect(committedAreaOf(mixed)).toBeLessThan(committedAreaOf(largeOnly));
+    expect(committedAreaOf(mixed)).toBeLessThan(committedAreaOf(smallOnly));
+  });
+
+  it('uses only the large size when all parts fit one large sheet with room to spare', () => {
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 50, height: 50 },
+        { width: 200, height: 200 },
+      ],
+    };
+    // Five 30×30 squares: a 50×50 holds only one (2×30 > 50); a 200×200 holds all five.
+    const parts = Array.from({ length: 5 }, (_, i) => makePart(`s${i}`, 30, 30));
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets.every((s) => s.sheetWidth === 200 && s.sheetHeight === 200)).toBe(true);
+  });
+
+  it('leaves a part that fits no available size unplaced and opens no sheet', () => {
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 50, height: 50 },
+        { width: 60, height: 60 },
+      ],
+    };
+    const parts = [makePart('huge', 100, 100)];
+    const q = new Map([['huge', 1]]);
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(0);
+    expect(res.unplaced).toHaveLength(1);
+  });
+
+  it('places the parts that fit and overflows only the permanently-unfittable one', () => {
+    // 'huge' fits no available size; the three 30×30 squares each fit either size. The oversized
+    // part must not strand the fittable ones — they get placed, only 'huge' lands in unplaced.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 50, height: 50 },
+        { width: 60, height: 60 },
+      ],
+    };
+    const parts = [
+      makePart('huge', 100, 100),
+      makePart('f0', 30, 30),
+      makePart('f1', 30, 30),
+      makePart('f2', 30, 30),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets.length).toBeGreaterThanOrEqual(1);
+    expect(res.totalPlaced).toBe(3);
+    expect(res.unplaced).toHaveLength(1);
+    expect(res.unplaced[0].id).toContain('huge');
+  });
+});
+
+describe('lower bound + multi-start sweep over the size set (Slice 3.2)', () => {
+  it('sheetLowerBound uses the given (largest) size area: 1.5x ⇒ 2', () => {
+    // large 100×100 = 10000; one 100×150 part = 15000 true area (1.5x) ⇒ ceil(1.5) = 2.
+    const parts = [makePart('a', 100, 150)];
+    const q = new Map([['a', 1]]);
+    expect(sheetLowerBound(parts, q, { width: 100, height: 100 })).toBe(2);
+  });
+
+  it('sheetLowerBound is 1 for 0.5x the large size even though it exceeds a small size', () => {
+    // large 200×200 = 40000; one 200×100 part = 20000 (0.5x large) ⇒ bound 1, although it
+    // exceeds a 100×100 small size (10000) which alone would force 2.
+    const parts = [makePart('a', 200, 100)];
+    const q = new Map([['a', 1]]);
+    expect(sheetLowerBound(parts, q, { width: 200, height: 200 })).toBe(1);
+  });
+
+  it('packIntoKSheets assigns each group an in-supply size that holds it', () => {
+    // The primary (first) size 100×100 cannot hold the 180×40 bars; the second size 200×50 can.
+    // Per-group size selection must pick the fitting size, not only the primary.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 100, height: 100 },
+        { width: 200, height: 50 },
+      ],
+    };
+    const parts = [makePart('bar0', 180, 40), makePart('bar1', 180, 40)];
+    const originals = new Map(parts.map((p) => [p.id, p]));
+    const res = packIntoKSheets(parts, originals, config, 2);
+
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets.every((s) => s.sheetWidth === 200 && s.sheetHeight === 50)).toBe(true);
+  });
+
+  it('packIntoKSheets picks the least-committed size per group when several fit', () => {
+    // Both sizes hold a single 40×40 square; each group should commit the smaller area.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 200, height: 200 },
+        { width: 50, height: 50 },
+      ],
+    };
+    const parts = [makePart('a', 40, 40), makePart('b', 40, 40)];
+    const originals = new Map(parts.map((p) => [p.id, p]));
+    const res = packIntoKSheets(parts, originals, config, 2);
+
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets.every((s) => s.sheetWidth === 50 && s.sheetHeight === 50)).toBe(true);
+  });
+
+  it('multi-start does not regress the mixed-size greedy result', () => {
+    // Same strip fixture as Slice 3.1: greedy mixing yields one large + one small = 27500.
+    // Multi-start must keep a result no worse than that (all placed, both sizes, ≤ baselines).
+    const small = { width: 100, height: 100 };
+    const large = { width: 100, height: 175 };
+    const parts = Array.from({ length: 7 }, (_, i) => makePart(`p${i}`, 100, 33));
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const config: NestingConfig = { ...fastConfig, sheets: [small, large] };
+
+    const greedy = nestParts({ parts, quantities: q, config });
+    const multi = nestPartsMultiStart({ parts, quantities: q, config }, { maxStarts: 3 });
+
+    expect(multi.unplaced).toHaveLength(0);
+    expect(isBetterResult(greedy, multi)).toBe(false);
+    expect(committedAreaOf(multi)).toBeLessThanOrEqual(committedAreaOf(greedy));
+  });
+});
+
+describe('progress frames include supply-stranded parts (follow-up 1)', () => {
+  it('reports a supply-stranded part in the intermediate progress unplaced count', () => {
+    // Size A (100×100) is born exhausted (cap 0); size B (40×40) is available. 'big' (50×50)
+    // fits only A, so once A is exhausted it is supply-stranded; 'small' (30×30) nests on B and
+    // drives the progress yields. While B is being packed, the live unplaced count must already
+    // include the stranded 'big' (it does in the final result; the intermediate frames must agree).
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 100, height: 100, maxCount: 0 },
+        { width: 40, height: 40 },
+      ],
+    };
+    const parts = [makePart('big', 50, 50), makePart('small', 30, 30)];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const gen = nestPartsIterative({ parts, quantities: q, config });
+    const frames: NestingResult[] = [];
+    let iter = gen.next();
+    while (!iter.done) {
+      frames.push(iter.value.result);
+      iter = gen.next();
+    }
+
+    expect(frames.length).toBeGreaterThan(0);
+    // Every intermediate frame must already account for the stranded 'big'.
+    expect(frames.every((f) => f.unplaced.some((p) => p.id.includes('big')))).toBe(true);
+    // Sanity: the final result also reports it (already true today).
+    expect(iter.value.unplaced.some((p) => p.id.includes('big'))).toBe(true);
+  });
+});
+
+describe('fittability respects grainConstraint (follow-up 2)', () => {
+  // A 40×180 part fits a 200×50 size ONLY when rotated 90°, and a 50×200 size ONLY at 0°.
+  const sheets = [
+    { width: 200, height: 50 },
+    { width: 50, height: 200 },
+  ];
+
+  it('classifies a grain-constrained part by its 0°/180° bbox, not a rotated fit', () => {
+    // Grain-constrained ⇒ only 0°/180° allowed, so the part can never use the 200×50 rotated fit.
+    // Fittability must therefore pick the 50×200 size where it fits upright; misclassifying it as
+    // fitting the 200×50 strands it (the GA can't rotate it to fit there).
+    const grain = makePart('g', 40, 180, { grainConstraint: true });
+    const res = nestParts({
+      parts: [grain],
+      quantities: new Map([['g', 1]]),
+      config: { ...fastConfig, sheets },
+    });
+
+    expect(res.totalPlaced).toBe(1);
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets[0].sheetWidth).toBe(50);
+    expect(res.sheets[0].sheetHeight).toBe(200);
+  });
+
+  it('control: a non-constrained part of the same shape still fits via rotation', () => {
+    const free = makePart('n', 40, 180);
+    const res = nestParts({
+      parts: [free],
+      quantities: new Map([['n', 1]]),
+      config: { ...fastConfig, sheets },
+    });
+    expect(res.totalPlaced).toBe(1);
+    expect(res.unplaced).toHaveLength(0);
+  });
+});
+
+describe('priority-aware scarce allocation (follow-up 3)', () => {
+  it('a smaller REQUIRED part wins the last scarce sheet over a larger OPTIONAL part', () => {
+    // Single size, cap 1: only one part fits per sheet (90+40 > 100 either way). A larger optional
+    // (90×90) and a smaller required (40×40) compete for the one available sheet. Pure area-greedy
+    // ordering would seat the denser optional; under scarce supply the required part must win.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 100, height: 100, maxCount: 1 }],
+    };
+    const parts = [
+      makePart('opt', 90, 90, { priority: 'optional' }),
+      makePart('req', 40, 40, { priority: 'required' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(1);
+    expect(res.totalPlaced).toBe(1);
+    const placed = res.sheets.flatMap((s) => s.placed.map((pp) => pp.part));
+    expect(placed.every((p) => (p.priority ?? 'required') === 'required')).toBe(true);
+    expect(res.unplaced.map((p) => p.id)).toContain('opt_0');
+  });
+
+  it('still rides optional parts along when capped supply is ample (not scarce)', () => {
+    // cap 5 but the job needs one sheet; supply is not scarce, so the optional part rides along on
+    // the same wide sheet as the required one (ride-along must survive the priority-first change).
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 200, height: 100, maxCount: 5 }],
+    };
+    const parts = [
+      makePart('R', 90, 90, { priority: 'required' }),
+      makePart('O', 90, 90, { priority: 'optional' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(1);
+    expect(res.totalPlaced).toBe(2);
+    expect(res.unplaced).toHaveLength(0);
+  });
+});
+
+describe('per-size supply caps + exhaustion (Slice 4)', () => {
+  // Full-width 100x60 strips: two never stack on a 100x100 sheet (60+60 > 100) and never sit
+  // side by side (100+100 > 100), so each sheet holds exactly one — geometry-forced, GA-proof.
+  const strip = (id: string) => makePart(id, 100, 60);
+
+  it('never opens more sheets of a size than its maxCount (one capped size)', () => {
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 100, height: 100, maxCount: 2 }],
+    };
+    const parts = [strip('a'), strip('b'), strip('c')];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(2);
+    expect(sizeCounts(res).get('100x100')).toBe(2);
+    expect(res.totalPlaced).toBe(2);
+    expect(res.unplaced).toHaveLength(1);
+  });
+
+  it('strands a REQUIRED part in unplaced when capped supply cannot hold it', () => {
+    // A (100x100, cap 1) fits only the 95x95 squares; B (200x80, cap 1) fits only the 190x70 bar.
+    // All three parts are REQUIRED and each needs its own sheet, but supply totals 2 ⇒ exactly 1
+    // of each opened, the third (sqZ) genuinely cannot be placed and lands in unplaced.
+    const A = { width: 100, height: 100, maxCount: 1 };
+    const B = { width: 200, height: 80, maxCount: 1 };
+    const config: NestingConfig = { ...fastConfig, sheets: [A, B] };
+    const parts = [
+      makePart('sqX', 95, 95, { priority: 'required' }),
+      makePart('barY', 190, 70, { priority: 'required' }),
+      makePart('sqZ', 95, 95, { priority: 'required' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const res = nestParts({ parts, quantities: q, config });
+
+    // Deterministic termination bound: never open more sheets than total available supply (2).
+    expect(res.sheets.length).toBeLessThanOrEqual(2);
+    expect(res.sheets).toHaveLength(2);
+    expect(sizeCounts(res).get('100x100')).toBe(1);
+    expect(sizeCounts(res).get('200x80')).toBe(1);
+    expect(res.totalPlaced).toBe(2);
+    // The stranded part is the REQUIRED sqZ — pin its identity and priority.
+    expect(res.unplaced).toHaveLength(1);
+    expect(res.unplaced[0].id).toContain('sqZ');
+    expect(res.unplaced[0].priority).toBe('required');
+    // No cap exceeded for any size.
+    for (const [, count] of sizeCounts(res)) expect(count).toBeLessThanOrEqual(1);
+  });
+
+  it('drops an OPTIONAL part under exhaustion without claiming a scarce sheet from required parts', () => {
+    // One 100x100 size, cap 2. Three REQUIRED squares each need their own sheet (3 > supply 2),
+    // plus one OPTIONAL part. Required parts must win the two scarce sheets; the optional part is
+    // dropped rather than consuming a sheet a required part needs.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 100, height: 100, maxCount: 2 }],
+    };
+    const parts = [
+      makePart('R1', 95, 95, { priority: 'required' }),
+      makePart('R2', 95, 95, { priority: 'required' }),
+      makePart('R3', 95, 95, { priority: 'required' }),
+      makePart('O', 60, 60, { priority: 'optional' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const res = nestParts({ parts, quantities: q, config });
+
+    // Deterministic termination bound: at most the available supply (2 sheets).
+    expect(res.sheets.length).toBeLessThanOrEqual(2);
+    expect(res.sheets).toHaveLength(2);
+    expect(res.totalPlaced).toBe(2);
+    // Every placed part is a required one — the optional part never claimed a scarce sheet.
+    const placed = res.sheets.flatMap((s) => s.placed.map((pp) => pp.part));
+    expect(placed.every((p) => (p.priority ?? 'required') === 'required')).toBe(true);
+    // The optional part is dropped, and a required part (R3) is also stranded by the shortfall.
+    const unplacedIds = res.unplaced.map((p) => p.id);
+    expect(unplacedIds).toContain('O_0');
+    expect(unplacedIds.some((id) => id.startsWith('R'))).toBe(true);
+  });
+
+  it('a maxCount of 0 never opens a sheet; parts that fit only it go to unplaced', () => {
+    // A (100x100) is born exhausted (cap 0); B (40x40) is available. 'big' fits only A and so can
+    // never be placed; 'small' fits B and is placed normally.
+    const A = { width: 100, height: 100, maxCount: 0 };
+    const B = { width: 40, height: 40 };
+    const config: NestingConfig = { ...fastConfig, sheets: [A, B] };
+    const parts = [makePart('big', 50, 50), makePart('small', 30, 30)];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const res = nestParts({ parts, quantities: q, config });
+
+    // No 100x100 sheet is ever opened (cap 0).
+    expect(sizeCounts(res).get('100x100') ?? 0).toBe(0);
+    expect(res.sheets).toHaveLength(1);
+    expect(sizeCounts(res).get('40x40')).toBe(1);
+    expect(res.totalPlaced).toBe(1);
+    expect(res.unplaced).toHaveLength(1);
+    expect(res.unplaced[0].id).toContain('big');
+  });
+
+  it('multi-start respects caps and bounds on supply exhaustion (required parts remain)', () => {
+    const A = { width: 100, height: 100, maxCount: 1 };
+    const B = { width: 200, height: 80, maxCount: 1 };
+    const config: NestingConfig = { ...fastConfig, sheets: [A, B] };
+    const parts = [
+      makePart('sqX', 95, 95, { priority: 'required' }),
+      makePart('barY', 190, 70, { priority: 'required' }),
+      makePart('sqZ', 95, 95, { priority: 'required' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const res = nestPartsMultiStart({ parts, quantities: q, config }, { maxStarts: 3 });
+
+    // Deterministic termination bound: never more sheets than the total available supply (2).
+    expect(res.sheets.length).toBeLessThanOrEqual(2);
+    expect(sizeCounts(res).get('100x100') ?? 0).toBeLessThanOrEqual(1);
+    expect(sizeCounts(res).get('200x80') ?? 0).toBeLessThanOrEqual(1);
+    expect(res.unplaced).toHaveLength(1);
+    // The stranded part is the REQUIRED sqZ — pin its identity.
+    expect(res.unplaced[0].id).toContain('sqZ');
+    expect(res.unplaced[0].priority).toBe('required');
+  });
+
+  it('packIntoKSheets never assigns a size beyond its cap', () => {
+    const A = { width: 100, height: 100, maxCount: 1 };
+    const config: NestingConfig = { ...fastConfig, sheets: [A] };
+    const parts = [makePart('sq0', 95, 95), makePart('sq1', 95, 95)];
+    const originals = new Map(parts.map((p) => [p.id, p]));
+    const res = packIntoKSheets(parts, originals, config, 2);
+
+    // Deterministic termination bound: never more sheets than the total available supply (1).
+    expect(res.sheets.length).toBeLessThanOrEqual(1);
+    expect(res.sheets).toHaveLength(1);
+    expect(sizeCounts(res).get('100x100')).toBe(1);
+    expect(res.unplaced).toHaveLength(1);
+    // The second group's part (sq1) is the one left unplaced — pin its identity.
+    expect(res.unplaced[0].id).toContain('sq1');
+  });
+
+  it('omitted maxCount means unlimited supply: opens as many sheets as needed', () => {
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 100, height: 100 }],
+    };
+    const parts = Array.from({ length: 8 }, (_, i) => strip(`p${i}`));
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(8);
+    expect(sizeCounts(res).get('100x100')).toBe(8);
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.totalPlaced).toBe(8);
+  });
+});
+
+describe('preview frames are overlap-free on full-fidelity geometry (triage)', () => {
+  // The GA searches RDP-simplified outlines and the engine swaps the full-fidelity geometry back
+  // in for display. Intermediate PROGRESS frames are emitted before the finalize/re-seat, so a
+  // mid-search candidate that is collision-free on simplified shapes can be DRAWN overlapping on
+  // full-fidelity shapes (transient, near 45° rotations). Seed 7 on lego-shelves produced a
+  // ~0.295 mm corner interpenetration in one such intermediate frame.
+  const xml = readFileSync(resolve('test-fixtures/lego-shelves.lbrn2'), 'utf-8');
+  const { uniqueParts: legoParts, quantities: legoQuantities } = deduplicateParts(
+    groupByContainment(removeCoincidentDuplicates(parseLightBurn(xml))),
+  );
+  const nfpConfig: NestingConfig = {
+    sheet: { width: 508, height: 762 },
+    kerf: 1,
+    rotationSteps: 72,
+    populationSize: 30,
+    generations: 40,
+    useNfpPlacement: true,
+    commonLineCutting: false,
+    timeBudgetMs: 12000,
+  };
+
+  /** True if any two placed parts' full-fidelity outer outlines interpenetrate in a result. */
+  function frameInterpenetrates(result: NestingResult): boolean {
+    for (const sheet of result.sheets) {
+      const polys = sheet.placed.map((pp) => getPlacedPolygons(pp)[0]);
+      for (let i = 0; i < polys.length; i++) {
+        for (let j = i + 1; j < polys.length; j++) {
+          if (polygonsInterpenetrate(polys[i], polys[j])) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  it('no intermediate preview frame interpenetrates for the known overlap seed (7)', () => {
+    seedRandom(7);
+    const gen = nestPartsIterative({
+      parts: legoParts,
+      quantities: legoQuantities,
+      config: nfpConfig,
+    });
+    let frames = 0;
+    let iter = gen.next();
+    while (!iter.done) {
+      frames++;
+      expect(frameInterpenetrates(iter.value.result)).toBe(false);
+      iter = gen.next();
+    }
+    expect(frames).toBeGreaterThan(0);
+  }, 90_000);
+
+  // The guard must be a NO-OP for the common (non-overlapping) case: a job of rectangles is never
+  // simplified (≤10 vertices) so the full-fidelity swap can never interpenetrate, and the
+  // preview frames must remain byte-for-byte the raw optimizer placement — never a fallback frame.
+  it('does not alter preview frames for a non-overlapping job (byte-equivalent to the raw swap)', () => {
+    const cfg: NestingConfig = { ...fastConfig };
+    // 'a' (1600) sorts ahead of 'b' (900), so the expanded/sorted candidate order matches the
+    // raw optimizer input order below; rects pass through simplification unchanged.
+    const parts = [makePart('a', 40, 40), makePart('b', 30, 30)];
+    const q = new Map([
+      ['a', 1],
+      ['b', 1],
+    ]);
+    const transforms = (placed: { x: number; y: number; rotation: number; mirror?: boolean }[]) =>
+      placed.map((p) => ({ x: p.x, y: p.y, rotation: p.rotation, mirror: p.mirror ?? false }));
+
+    seedRandom(7);
+    const engine = nestPartsIterative({ parts, quantities: q, config: cfg });
+    const engineFrames: ReturnType<typeof transforms>[] = [];
+    for (const prog of engine) {
+      engineFrames.push(transforms(prog.result.sheets[prog.currentSheet]?.placed ?? []));
+    }
+
+    seedRandom(7);
+    const sheet = availableSheets(cfg)[0];
+    const optConfig = makeOptimizerConfig(cfg);
+    const rawGen = optimizeIterative(
+      [makePart('a', 40, 40), makePart('b', 30, 30)],
+      sheet,
+      cfg.kerf,
+      optConfig,
+    );
+    const rawFrames: ReturnType<typeof transforms>[] = [];
+    let it = rawGen.next();
+    while (!it.done) {
+      rawFrames.push(transforms(it.value.bestPlacement));
+      it = rawGen.next();
+    }
+
+    expect(engineFrames.length).toBeGreaterThan(0);
+    // Not a stale/empty fallback frame — the very first frame already reflects current placement.
+    expect(engineFrames[0].length).toBeGreaterThan(0);
+    expect(engineFrames).toEqual(rawFrames);
   });
 });

@@ -1,17 +1,25 @@
 <script lang="ts">
   import { parseSVG } from '$lib/parsers/svg-parser';
-  import { parseLightBurn } from '$lib/parsers/lightburn-parser';
+  import { parseLightBurnWithDiagnostics, summarizeSkipped } from '$lib/parsers/lightburn-parser';
   import { projectStore } from '$lib/stores/project.svelte';
   import { MAX_FILE_SIZE } from '$lib/parsers/constants';
   import { tooltip } from '$lib/actions/tooltip';
 
   let dragOver = $state(false);
+  // Non-blocking inline import feedback (never a modal alert(), which would block
+  // the page and any automation). `error` for failures/zero-import, `info` for a
+  // successful-but-partial import that skipped some shapes.
+  let importMessage = $state<{ text: string; kind: 'error' | 'info' } | null>(null);
 
   function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
+    importMessage = null;
     const file = files[0];
     if (file.size > MAX_FILE_SIZE) {
-      alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`);
+      importMessage = {
+        text: `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`,
+        kind: 'error',
+      };
       return;
     }
     const reader = new FileReader();
@@ -19,25 +27,46 @@
       const text = reader.result as string;
       const name = file.name;
       let parts;
+      // Human-readable note about shapes the parser could not import, so a
+      // zero/partial result explains itself instead of failing silently.
+      let skipNote: string | null = null;
 
       try {
         if (name.endsWith('.svg')) {
           parts = parseSVG(text);
         } else if (name.endsWith('.lbrn') || name.endsWith('.lbrn2')) {
-          parts = parseLightBurn(text);
+          const result = parseLightBurnWithDiagnostics(text);
+          parts = result.parts;
+          skipNote = summarizeSkipped(result.diagnostics);
         } else {
-          alert('Unsupported file format. Please use .svg, .lbrn, or .lbrn2');
+          importMessage = {
+            text: 'Unsupported file format. Please use .svg, .lbrn, or .lbrn2',
+            kind: 'error',
+          };
           return;
         }
       } catch {
         // A malformed/crafted file should surface a friendly error, not an unhandled throw.
-        alert('Could not read this file — it may be malformed or corrupted.');
+        importMessage = {
+          text: 'Could not read this file — it may be malformed or corrupted.',
+          kind: 'error',
+        };
         return;
       }
 
       if (parts.length === 0) {
-        alert('No parts found in file.');
+        importMessage = {
+          text: skipNote ? `No parts imported. ${skipNote}.` : 'No parts found in file.',
+          kind: 'error',
+        };
         return;
+      }
+
+      if (skipNote) {
+        importMessage = {
+          text: `Imported ${parts.length} part${parts.length === 1 ? '' : 's'}. ${skipNote}.`,
+          kind: 'info',
+        };
       }
 
       projectStore.setParts(parts, name);
@@ -99,6 +128,15 @@
   </label>
 </div>
 
+{#if importMessage}
+  <p
+    class="import-message {importMessage.kind}"
+    role={importMessage.kind === 'error' ? 'alert' : 'status'}
+  >
+    {importMessage.text}
+  </p>
+{/if}
+
 <style>
   .upload-zone {
     border: 2px dashed var(--border-strong);
@@ -135,6 +173,24 @@
     font-weight: bold;
     color: var(--brand);
     text-shadow: var(--glow-brand);
+  }
+
+  .import-message {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    line-height: 1.3;
+  }
+
+  .import-message.error {
+    color: var(--danger, #ff6b6b);
+    background: rgba(255, 107, 107, 0.1);
+  }
+
+  .import-message.info {
+    color: var(--text-dim);
+    background: var(--surface-inset);
   }
 
   .hint {

@@ -1,7 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
+import { exportToLightBurn, exportSheetsToLightBurn } from '$lib/exporters/lightburn-exporter';
 import { makePlaced } from '../support/parts';
-import type { Part } from '$lib/geometry/types';
+import type { Part, SheetResult } from '$lib/geometry/types';
+
+function sheet(sheetIndex: number, sheetWidth: number, sheetHeight: number): SheetResult {
+  return {
+    sheetIndex,
+    placed: [makePlaced('a', 10, 10, 0, 0)],
+    stripHeight: 0,
+    utilization: 0,
+    sheetWidth,
+    sheetHeight,
+  };
+}
 
 describe('exportToLightBurn', () => {
   it('generates valid XML', () => {
@@ -136,5 +147,26 @@ describe('exportToLightBurn', () => {
       sheetHeight: 100,
     });
     expect(xml).not.toContain('Type="Path"');
+  });
+});
+
+describe('exportSheetsToLightBurn', () => {
+  it('sizes each sheet boundary of a mixed-size result by its own dimensions', () => {
+    const files = exportSheetsToLightBurn({ sheets: [sheet(0, 600, 350), sheet(1, 500, 400)] });
+
+    expect(files).toHaveLength(2);
+    expect(files[0].content).toContain('W="600"');
+    expect(files[0].content).toContain('H="350"');
+    expect(files[1].content).toContain('W="500"');
+    expect(files[1].content).toContain('H="400"');
+  });
+
+  it('keeps a single-size result at its own dimensions', () => {
+    const files = exportSheetsToLightBurn({ sheets: [sheet(0, 600, 350)] });
+
+    expect(files).toHaveLength(1);
+    expect(files[0].content).toContain('W="600"');
+    expect(files[0].content).toContain('H="350"');
+    expect(files[0].filename).toBe('nested-layout.lbrn2');
   });
 });

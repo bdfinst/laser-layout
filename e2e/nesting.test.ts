@@ -62,10 +62,10 @@ test.describe('Material Settings', () => {
   test('shows width, height, kerf (mm + in) and tolerance controls', async ({ page }) => {
     await page.goto('/');
     // Each dimension exposes a metric and an imperial input simultaneously.
-    await expect(page.locator('#sheet-width-mm')).toBeVisible();
-    await expect(page.locator('#sheet-width-in')).toBeVisible();
-    await expect(page.locator('#sheet-height-mm')).toBeVisible();
-    await expect(page.locator('#sheet-height-in')).toBeVisible();
+    await expect(page.locator('#sheet-0-width-mm')).toBeVisible();
+    await expect(page.locator('#sheet-0-width-in')).toBeVisible();
+    await expect(page.locator('#sheet-0-height-mm')).toBeVisible();
+    await expect(page.locator('#sheet-0-height-in')).toBeVisible();
     await expect(page.locator('#kerf-mm')).toBeVisible();
     await expect(page.locator('#kerf-in')).toBeVisible();
     await expect(page.locator('#tolerance')).toBeVisible();
@@ -74,22 +74,22 @@ test.describe('Material Settings', () => {
   test('mm and in inputs show the same dimension', async ({ page }) => {
     await page.goto('/');
     // Default sheet width is 508mm = 20in.
-    expect(parseFloat(await page.locator('#sheet-width-mm').inputValue())).toBe(508);
-    expect(parseFloat(await page.locator('#sheet-width-in').inputValue())).toBeCloseTo(20, 1);
+    expect(parseFloat(await page.locator('#sheet-0-width-mm').inputValue())).toBe(508);
+    expect(parseFloat(await page.locator('#sheet-0-width-in').inputValue())).toBeCloseTo(20, 1);
   });
 
   test('editing the mm input updates the in input', async ({ page }) => {
     await page.goto('/');
-    await fillAndCommit(page, '#sheet-width-mm', '254');
+    await fillAndCommit(page, '#sheet-0-width-mm', '254');
     // 254mm = 10in
-    expect(parseFloat(await page.locator('#sheet-width-in').inputValue())).toBeCloseTo(10, 1);
+    expect(parseFloat(await page.locator('#sheet-0-width-in').inputValue())).toBeCloseTo(10, 1);
   });
 
   test('editing the in input updates the mm input', async ({ page }) => {
     await page.goto('/');
-    await fillAndCommit(page, '#sheet-width-in', '12');
+    await fillAndCommit(page, '#sheet-0-width-in', '12');
     // 12in = 304.8mm
-    expect(parseFloat(await page.locator('#sheet-width-mm').inputValue())).toBeCloseTo(305, 0);
+    expect(parseFloat(await page.locator('#sheet-0-width-mm').inputValue())).toBeCloseTo(305, 0);
   });
 
   test('tolerance slider adjusts shape matching', async ({ page }) => {

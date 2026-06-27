@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { projectStore } from '$lib/stores/project.svelte';
+import { projectStore, fromDisplayUnits, toDisplayUnits } from '$lib/stores/project.svelte';
+import { availableSheets } from '$lib/geometry/types';
 import { makeRect as rect } from '../support/parts';
 
 beforeEach(() => {
@@ -142,5 +143,116 @@ describe('setGrainConstraint', () => {
     projectStore.setParts([rect('a', 10, 10)], 'f.svg');
 
     expect(projectStore.state.parts.every((p) => p.grainConstraint !== true)).toBe(true);
+  });
+});
+
+describe('sheet-size list', () => {
+  it('exposes the single default size as a one-element list', () => {
+    const sizes = projectStore.sheetSizes;
+    expect(sizes).toHaveLength(1);
+    expect(sizes[0]).toEqual({
+      width: projectStore.state.config.sheet.width,
+      height: projectStore.state.config.sheet.height,
+    });
+  });
+
+  it('addSheetSize appends a copy-forward of the existing size and clears the result', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+    projectStore.updateResult(
+      { sheets: [], unplaced: [], sheetWidth: 1, sheetHeight: 1, totalPlaced: 0 },
+      1,
+      0,
+    );
+
+    projectStore.addSheetSize();
+
+    const sizes = projectStore.sheetSizes;
+    expect(sizes).toHaveLength(2);
+    // New row pre-filled with the prior size's dimensions (copy-forward).
+    expect(sizes[1].width).toBe(600);
+    expect(sizes[1].height).toBe(350);
+    // Both sizes are present in the authoritative config list the engine consumes.
+    expect(availableSheets(projectStore.state.config)).toHaveLength(2);
+    expect(projectStore.state.result).toBeNull();
+  });
+
+  it('addSheetSize copies the last configured size when more than one exists', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+    projectStore.addSheetSize();
+    projectStore.updateSheetSize(1, { width: 500, height: 400 });
+
+    projectStore.addSheetSize();
+
+    const sizes = projectStore.sheetSizes;
+    expect(sizes).toHaveLength(3);
+    // Copy-forward of the LAST size (500 × 400), not the first.
+    expect(sizes[2]).toMatchObject({ width: 500, height: 400 });
+  });
+
+  it('updateSheetSize edits one size width without touching the others', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+    projectStore.addSheetSize();
+    projectStore.updateSheetSize(1, { width: 500, height: 400 });
+
+    projectStore.updateSheetSize(0, { width: 650 });
+
+    expect(projectStore.sheetSizes[0]).toMatchObject({ width: 650, height: 350 });
+    expect(projectStore.sheetSizes[1]).toMatchObject({ width: 500, height: 400 });
+  });
+
+  it('removeSheetSize removes the targeted size when more than one exists', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+    projectStore.addSheetSize();
+    projectStore.updateSheetSize(1, { width: 500, height: 400 });
+
+    projectStore.removeSheetSize(0);
+
+    expect(projectStore.sheetSizes).toHaveLength(1);
+    expect(projectStore.sheetSizes[0]).toMatchObject({ width: 500, height: 400 });
+  });
+
+  it('never removes the last remaining size', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+
+    projectStore.removeSheetSize(0);
+
+    expect(projectStore.sheetSizes).toHaveLength(1);
+    expect(projectStore.sheetSizes[0]).toMatchObject({ width: 600, height: 350 });
+  });
+
+  it('setSheetMaxCount caps a size at the given count', () => {
+    projectStore.setSheetMaxCount(0, 5);
+    expect(projectStore.sheetSizes[0].maxCount).toBe(5);
+  });
+
+  it('setSheetMaxCount with a blank value clears the cap (unlimited)', () => {
+    projectStore.setSheetMaxCount(0, 5);
+    projectStore.setSheetMaxCount(0, undefined);
+    expect(projectStore.sheetSizes[0].maxCount).toBeUndefined();
+  });
+
+  it('setSheetMaxCount coerces a value below 1 up to 1', () => {
+    projectStore.setSheetMaxCount(0, 0);
+    expect(projectStore.sheetSizes[0].maxCount).toBe(1);
+
+    projectStore.setSheetMaxCount(0, -3);
+    expect(projectStore.sheetSizes[0].maxCount).toBe(1);
+  });
+
+  it('stores the mm equivalent when a size is entered in inches', () => {
+    const widthMM = fromDisplayUnits(24, 'in');
+
+    projectStore.updateSheetSize(0, { width: widthMM });
+
+    expect(projectStore.sheetSizes[0].width).toBeCloseTo(609.6, 5);
+    expect(toDisplayUnits(projectStore.sheetSizes[0].width, 'in')).toBeCloseTo(24, 5);
+  });
+
+  it('keeps config.sheet synced to the first size for back-compat reads', () => {
+    projectStore.updateSheetSize(0, { width: 600, height: 350 });
+    projectStore.addSheetSize();
+    projectStore.updateSheetSize(1, { width: 500, height: 400 });
+
+    expect(projectStore.state.config.sheet).toMatchObject({ width: 600, height: 350 });
   });
 });

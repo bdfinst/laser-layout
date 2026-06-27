@@ -50,11 +50,24 @@ export interface PlacedPart {
 export interface MaterialSheet {
   width: number;
   height: number;
+  /**
+   * Optional supply cap: the maximum number of sheets of this size the engine may open.
+   * Omitted ⇒ unlimited supply. (Enforcement lands in a later slice; the field is part of
+   * the authoritative size model here.)
+   */
+  maxCount?: number;
 }
 
 /** Configuration for the nesting algorithm */
 export interface NestingConfig {
   sheet: MaterialSheet;
+  /**
+   * Available material sheet sizes. When present and non-empty this is the authoritative
+   * source of sizes and the single `sheet` is ignored (normalize via {@link availableSheets}).
+   * When omitted, `sheet` is treated as the sole available size. An empty list is invalid and
+   * rejected at the engine boundary.
+   */
+  sheets?: MaterialSheet[];
   kerf: number; // spacing between parts in mm, default 1
   rotationSteps: number; // number of rotation angles to try
   populationSize: number; // GA population size
@@ -88,4 +101,25 @@ export interface SheetResult {
   placed: PlacedPart[];
   stripHeight: number;
   utilization: number;
+  /** Dimensions (mm) of the material sheet this layout was placed on. */
+  sheetWidth: number;
+  sheetHeight: number;
+}
+
+/**
+ * Resolve the available material sheet sizes from a nesting config.
+ *
+ * The `sheets` list is the authoritative source: when present it wins and the single `sheet`
+ * is ignored. When `sheets` is omitted, the single `sheet` is normalized to a one-element list.
+ * A present-but-empty `sheets` list is invalid and throws. A size's omitted `maxCount` means
+ * unlimited supply (the field is returned untouched).
+ */
+export function availableSheets(config: NestingConfig): MaterialSheet[] {
+  if (config.sheets !== undefined) {
+    if (config.sheets.length === 0) {
+      throw new Error('No sheet sizes configured: the available sheet-size list is empty.');
+    }
+    return config.sheets;
+  }
+  return [config.sheet];
 }

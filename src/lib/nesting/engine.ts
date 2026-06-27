@@ -1,4 +1,11 @@
-import type { Part, PlacedPart, NestingConfig, SheetResult } from '$lib/geometry/types';
+import type {
+  Part,
+  PlacedPart,
+  NestingConfig,
+  SheetResult,
+  MaterialSheet,
+} from '$lib/geometry/types';
+import { availableSheets } from '$lib/geometry/types';
 import {
   optimize,
   optimizeIterative,
@@ -11,6 +18,7 @@ import { bottomLeftFill } from './placement';
 import { polygonsInterpenetrate } from './nfp';
 import { boundingBox, polygonArea, getPlacedPolygons } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
+import { createSupplyPool, type SupplyPool } from './supply-pool';
 
 export interface NestingInput {
   parts: Part[];
@@ -37,6 +45,20 @@ export interface NestingProgress {
 /** A part is required unless it explicitly opts into the "optional" quantity priority (#43). */
 function isRequired(part: Part): boolean {
   return (part.priority ?? 'required') === 'required';
+}
+
+/**
+ * The parts to feed to the next sheet's placement, applying priority-first allocation under scarce
+ * supply. When supply can't comfortably cover every still-unplaced required part (total remaining
+ * sheets ≤ remaining required parts), hold optional parts back so a larger optional can't claim a
+ * scarce sheet a required part needs — required parts must win the scarce supply. When supply is
+ * ample (or unlimited), feed everything so optional parts still ride along on the same sheets.
+ */
+function placementCandidates(remaining: Part[], pool: SupplyPool, jobHasRequired: boolean): Part[] {
+  if (!jobHasRequired) return remaining;
+  const required = remaining.filter(isRequired);
+  if (required.length === 0) return remaining;
+  return pool.totalRemaining() <= required.length ? required : remaining;
 }
 
 function expandParts(parts: Part[], quantities: Map<string, number>): Part[] {
@@ -88,6 +110,29 @@ function restoreUnplaced(remaining: Part[], originals: Map<string, Part>): Part[
 }
 
 /**
+ * Make a simplified-geometry placement safe to DISPLAY/EXPORT on full-fidelity outlines — the
+ * single correctness gate shared by the live-preview path and the per-sheet finalize.
+ *
+ * The GA searches RDP-simplified shapes, so a placement that is collision-free on the simplified
+ * outlines can interpenetrate once the original geometry is restored: the simplified outline can
+ * sit up to its RDP tolerance (~1% of the bbox, which exceeds the kerf on large parts) inside the
+ * real one, worst near 45° rotations where the bbox — and thus the tolerance — is largest. Swap
+ * the original geometry in; only when that actually interpenetrates fall back via `onOverlap`
+ * (the preview re-shows its last known-good frame; finalize re-seats deterministically). The fast
+ * common path — no overlap — returns the plain geometry swap unchanged, so it stays byte-for-byte
+ * identical. The check is a bbox-prefiltered concave interpenetration test, cheap enough to run on
+ * every progress frame.
+ */
+function displaySafe(
+  placed: PlacedPart[],
+  originals: Map<string, Part>,
+  onOverlap: () => PlacedPart[],
+): PlacedPart[] {
+  const swapped = withOriginalGeometry(placed, originals);
+  return anyInterpenetration(swapped) ? onOverlap() : swapped;
+}
+
+/**
  * Finalize a committed (simplified-geometry) sheet placement onto full-fidelity geometry.
  *
  * The GA searches on RDP-simplified outlines for speed, so a placement that is collision-free
@@ -113,6 +158,7 @@ function finalizePlacement(
   placed: PlacedPart[],
   originals: Map<string, Part>,
   config: NestingConfig,
+  sheet: MaterialSheet,
 ): PlacedPart[] {
   if (placed.length === 0) return withOriginalGeometry(placed, originals);
 
@@ -126,7 +172,7 @@ function finalizePlacement(
         rotation: pp.rotation,
         mirror: pp.mirror,
       })),
-      config.sheet,
+      sheet,
       placementKerf(config),
       true,
       null,
@@ -139,10 +185,10 @@ function finalizePlacement(
   // Otherwise the cheap geometry swap is correct UNLESS the simplification slack (RDP tolerance
   // is ~1% of the bbox, which exceeds the kerf on large parts) lets the full-fidelity outlines
   // interpenetrate where the simplified ones only touched — exactly what the tight NFP feasible
-  // seats (#26) expose. Re-seat only when that actually happens, so density-optimal nests keep
-  // the GA's NFP packing and only a genuinely overlapping sheet pays for the deterministic refill.
-  const swapped = withOriginalGeometry(placed, originals);
-  return anyInterpenetration(swapped) ? reseat() : swapped;
+  // seats (#26) expose. The shared display gate re-seats only when that actually happens, so
+  // density-optimal nests keep the GA's NFP packing and only a genuinely overlapping sheet pays
+  // for the deterministic refill — the same correctness gate the live preview uses.
+  return displaySafe(placed, originals, reseat);
 }
 
 /** True if any two placed parts' full-fidelity outer outlines interpenetrate (bbox-prefiltered). */
@@ -180,6 +226,128 @@ function sortByDescendingArea(parts: Part[]): Part[] {
 function bboxArea(part: Part): number {
   const bb = boundingBox(part.polygons[0]);
   return bb.width * bb.height;
+}
+
+/**
+ * True if a part's bounding box fits a sheet. A free part is fittable in either 90° orientation;
+ * a grain-constrained part may only rotate 0°/180° (its bbox is fixed), so the rotated orientation
+ * is never available to it and must not count toward fittability — otherwise a tall grain part
+ * that fits a size only when rotated is wrongly classified fittable and gets stranded by the
+ * placement loop. (`lockOrientation` only forbids mirroring, which never changes axis fit.)
+ */
+function partFitsSheet(part: Part, sheet: MaterialSheet): boolean {
+  const bb = boundingBox(part.polygons[0]);
+  const fitsUpright = bb.width <= sheet.width && bb.height <= sheet.height;
+  if (part.grainConstraint) return fitsUpright;
+  return fitsUpright || (bb.height <= sheet.width && bb.width <= sheet.height);
+}
+
+/**
+ * Split parts into those that fit at least one available size and those that fit none.
+ * Permanently-unfittable parts (fit NO size) can never be placed; separating them once keeps
+ * them from stranding the parts that DO fit and stops the sheet-opening loop spinning on an
+ * unplaceable largest part.
+ */
+function partitionFittable(
+  parts: Part[],
+  sizes: MaterialSheet[],
+): { fittable: Part[]; unfittable: Part[] } {
+  const fittable: Part[] = [];
+  const unfittable: Part[] = [];
+  for (const p of parts) {
+    if (sizes.some((s) => partFitsSheet(p, s))) fittable.push(p);
+    else unfittable.push(p);
+  }
+  return { fittable, unfittable };
+}
+
+/** The remaining part with the largest bounding-box area (the one the next sheet must seat). */
+function largestPartByArea(parts: Part[]): Part | undefined {
+  let best: Part | undefined;
+  let bestArea = -Infinity;
+  for (const p of parts) {
+    const a = bboxArea(p);
+    if (a > bestArea) {
+      bestArea = a;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** A cheap, GA-free score for how a candidate size would serve the remaining parts. */
+export interface SizeEvaluation {
+  /** This size's own committed material area (`width × height`). */
+  committedArea: number;
+  /** Estimated number of remaining parts the size could hold (see {@link evaluateSizeFit}). */
+  placedCount: number;
+}
+
+/**
+ * Cheap, GA-free estimate of how a size would serve the remaining parts, used to pick the ONE
+ * size to actually run the GA on (a full GA per candidate would multiply per-start cost).
+ *
+ * HEURISTIC: walk the parts and greedily "spend" the sheet's area budget — count a part as
+ * placed when its kerf-padded bounding-box area still fits the remaining budget and the part
+ * fits the sheet in some 90° orientation. This is a fragmentation-blind upper bound, but it is
+ * monotonic in sheet area (a larger sheet never scores fewer parts than a smaller one), which is
+ * all the selector needs to rank candidates by "most parts placed, then least committed area".
+ */
+function evaluateSizeFit(parts: Part[], sheet: MaterialSheet, kerf: number): SizeEvaluation {
+  const committedArea = sheet.width * sheet.height;
+  let budget = committedArea;
+  let placedCount = 0;
+  for (const part of parts) {
+    if (!partFitsSheet(part, sheet)) continue;
+    const bb = boundingBox(part.polygons[0]);
+    const cell = (bb.width + kerf) * (bb.height + kerf);
+    if (cell <= budget) {
+      budget -= cell;
+      placedCount++;
+    }
+  }
+  return { committedArea, placedCount };
+}
+
+/**
+ * Choose which available size to open for the next sheet, under the Slice-2 objective: place the
+ * most parts, then commit the least material area. `evaluate` scores each candidate (injected so
+ * tests can stub deterministic scores). Sizes that cannot contain the largest remaining part are
+ * discarded first — a sheet that can't seat the part we are trying to place is never a valid
+ * choice. Returns null when no size survives, so the caller routes the remaining parts to
+ * `unplaced` without opening an empty sheet.
+ */
+export function selectSheetForNextOpen(
+  remainingParts: Part[],
+  candidateSizes: MaterialSheet[],
+  evaluate: (size: MaterialSheet) => SizeEvaluation,
+): MaterialSheet | null {
+  const largest = largestPartByArea(remainingParts);
+  const survivors = largest
+    ? candidateSizes.filter((s) => partFitsSheet(largest, s))
+    : candidateSizes;
+
+  let best: MaterialSheet | null = null;
+  let bestEval: SizeEvaluation | null = null;
+  for (const size of survivors) {
+    const e = evaluate(size);
+    if (
+      bestEval === null ||
+      e.placedCount > bestEval.placedCount ||
+      (e.placedCount === bestEval.placedCount && e.committedArea < bestEval.committedArea)
+    ) {
+      best = size;
+      bestEval = e;
+    }
+  }
+  return best;
+}
+
+/** Top-level default dimensions for a result: the first opened sheet's size, else the primary. */
+function topLevelDimensions(sheets: SheetResult[], primary: MaterialSheet): MaterialSheet {
+  return sheets.length > 0
+    ? { width: sheets[0].sheetWidth, height: sheets[0].sheetHeight }
+    : primary;
 }
 
 /**
@@ -247,36 +415,38 @@ function placementKerf(config: NestingConfig): number {
 function buildSheetResult(
   placed: PlacedPart[],
   sheetIndex: number,
-  config: NestingConfig,
+  sheet: MaterialSheet,
 ): SheetResult {
-  const stats = computeSheetStats(placed, config.sheet);
+  const stats = computeSheetStats(placed, sheet);
   return {
     sheetIndex,
     placed,
     stripHeight: stats.stripHeight,
     utilization: stats.utilization,
+    sheetWidth: sheet.width,
+    sheetHeight: sheet.height,
   };
 }
 
 function buildNestingResult(
   sheets: SheetResult[],
   unplaced: Part[],
-  config: NestingConfig,
+  sheet: MaterialSheet,
 ): NestingResult {
   return {
     sheets,
     unplaced,
-    sheetWidth: config.sheet.width,
-    sheetHeight: config.sheet.height,
+    sheetWidth: sheet.width,
+    sheetHeight: sheet.height,
     totalPlaced: sheets.reduce((sum, s) => sum + s.placed.length, 0),
   };
 }
 
-const EMPTY_RESULT = (config: NestingConfig): NestingResult => ({
+const EMPTY_RESULT = (sheet: MaterialSheet): NestingResult => ({
   sheets: [],
   unplaced: [],
-  sheetWidth: config.sheet.width,
-  sheetHeight: config.sheet.height,
+  sheetWidth: sheet.width,
+  sheetHeight: sheet.height,
   totalPlaced: 0,
 });
 
@@ -289,13 +459,27 @@ export function* nestPartsIterative(
   input: NestingInput,
 ): Generator<NestingProgress, NestingResult, void> {
   const { parts, quantities, config } = input;
+  // Resolve (and validate) the available sizes; each opened sheet picks the size that best
+  // serves the parts still to be placed (least committed area for the most parts).
+  const candidateSizes = availableSheets(config);
+  const primary = candidateSizes[0];
   const expanded = expandParts(parts, quantities);
   const originals = new Map(expanded.map((p) => [p.id, p]));
   let remaining = sortByDescendingArea(simplifyPartsForNesting(expanded));
 
   if (remaining.length === 0) {
-    return EMPTY_RESULT(config);
+    return EMPTY_RESULT(primary);
   }
+
+  // Set permanently-unfittable parts (fit NO configured size) aside once so they don't strand
+  // the parts that DO fit.
+  const { fittable, unfittable } = partitionFittable(remaining, candidateSizes);
+  remaining = fittable;
+
+  // Per-size supply: each opened sheet consumes one of its chosen size; an exhausted size
+  // leaves the candidate set and parts that fit only exhausted sizes can no longer be placed.
+  const pool = createSupplyPool(candidateSizes);
+  const supplyStranded: Part[] = [];
 
   const optConfig = makeOptimizerConfig(config);
   const sheets: SheetResult[] = [];
@@ -306,32 +490,54 @@ export function* nestPartsIterative(
   const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
-    const gen = optimizeIterative(remaining, config.sheet, placementKerf(config), optConfig);
+    const inSupply = pool.inSupplySizes();
+    // Re-partition against CURRENT supply: a part whose only fitting size is now exhausted can
+    // never be placed (supply only shrinks), so set it aside. When nothing fits an in-supply
+    // size, stop — the leftover (incl. required parts) flows to `unplaced` below.
+    const { fittable: placeable, unfittable: stranded } = partitionFittable(remaining, inSupply);
+    if (placeable.length === 0) break;
+    if (stranded.length > 0) {
+      supplyStranded.push(...stranded);
+      remaining = placeable;
+    }
+
+    // Under scarce supply, feed only required parts so a larger optional can't claim a sheet a
+    // required part needs; otherwise feed everything so optional parts still ride along.
+    const candidates = placementCandidates(remaining, pool, jobHasRequired);
+    // Pick this sheet's size from the in-supply candidates for the remaining placeable parts;
+    // null is a defensive guard — every placeable part fits ≥1 in-supply size.
+    const sheet = selectSheetForNextOpen(candidates, inSupply, (s) =>
+      evaluateSizeFit(candidates, s, placementKerf(config)),
+    );
+    if (!sheet) break;
+    const gen = optimizeIterative(candidates, sheet, placementKerf(config), optConfig);
     // eslint-disable-next-line no-useless-assignment
     let lastPlacement: PlacedPart[] = [];
+    // Last full-fidelity placement proven safe to draw — the fallback when an intermediate
+    // candidate would interpenetrate once its original geometry is restored (see displaySafe).
+    let lastSafeDisplay: PlacedPart[] = [];
 
     let iter: IteratorResult<OptimizeProgress, PlacedPart[]>;
     do {
       iter = gen.next();
       if (!iter.done) {
         lastPlacement = iter.value.bestPlacement;
-        // Build intermediate result showing current sheet progress
-        const currentSheet = buildSheetResult(
-          withOriginalGeometry(lastPlacement, originals),
-          sheetIndex,
-          config,
-        );
+        // Build intermediate result showing current sheet progress on full-fidelity geometry,
+        // guaranteed overlap-free for display (falls back to the last known-good frame).
+        const display = displaySafe(lastPlacement, originals, () => lastSafeDisplay);
+        lastSafeDisplay = display;
+        const currentSheet = buildSheetResult(display, sheetIndex, sheet);
         const intermediateSheets = [...sheets, currentSheet];
-        const placedIds = new Set(lastPlacement.map((p) => p.part.id));
+        const placedIds = new Set(display.map((p) => p.part.id));
         const unplaced = restoreUnplaced(
-          remaining.filter((p) => !placedIds.has(p.id)),
+          [...remaining.filter((p) => !placedIds.has(p.id)), ...supplyStranded, ...unfittable],
           originals,
         );
 
         yield {
           currentSheet: sheetIndex,
           generation: iter.value.generation,
-          result: buildNestingResult(intermediateSheets, unplaced, config),
+          result: buildNestingResult(intermediateSheets, unplaced, sheet),
         };
       }
     } while (!iter.done);
@@ -342,12 +548,13 @@ export function* nestPartsIterative(
       break;
     }
 
-    const finalized = finalizePlacement(finalPlacement, originals, config);
+    const finalized = finalizePlacement(finalPlacement, originals, config, sheet);
     // The common-line exact pass re-seats on full geometry; if nothing seats, stop to avoid
     // looping forever on parts that can't be made overlap-free on this sheet size.
     if (finalized.length === 0) break;
 
-    sheets.push(buildSheetResult(finalized, sheetIndex, config));
+    sheets.push(buildSheetResult(finalized, sheetIndex, sheet));
+    pool.decrement(sheet);
 
     // Remove placed parts from remaining
     const placedIds = new Set(finalized.map((p) => p.part.id));
@@ -359,7 +566,11 @@ export function* nestPartsIterative(
     if (jobHasRequired && !remaining.some(isRequired)) break;
   }
 
-  return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
+  return buildNestingResult(
+    sheets,
+    restoreUnplaced([...remaining, ...supplyStranded, ...unfittable], originals),
+    topLevelDimensions(sheets, primary),
+  );
 }
 
 /**
@@ -370,13 +581,24 @@ export function nestParts(
   onProgress?: (generation: number, bestFitness: number) => void,
 ): NestingResult {
   const { parts, quantities, config } = input;
+  const candidateSizes = availableSheets(config);
+  const primary = candidateSizes[0];
   const expanded = expandParts(parts, quantities);
   const originals = new Map(expanded.map((p) => [p.id, p]));
   let remaining = sortByDescendingArea(simplifyPartsForNesting(expanded));
 
   if (remaining.length === 0) {
-    return EMPTY_RESULT(config);
+    return EMPTY_RESULT(primary);
   }
+
+  // Set permanently-unfittable parts (fit NO configured size) aside once so they don't strand
+  // the parts that DO fit.
+  const { fittable, unfittable } = partitionFittable(remaining, candidateSizes);
+  remaining = fittable;
+
+  // Per-size supply state (see nestPartsIterative): exhausted sizes leave the candidate set.
+  const pool = createSupplyPool(candidateSizes);
+  const supplyStranded: Part[] = [];
 
   const optConfig = makeOptimizerConfig(config);
   const sheets: SheetResult[] = [];
@@ -384,14 +606,33 @@ export function nestParts(
   const jobHasRequired = remaining.some(isRequired);
 
   while (remaining.length > 0) {
-    const placed = optimize(remaining, config.sheet, placementKerf(config), optConfig, onProgress);
+    const inSupply = pool.inSupplySizes();
+    // Re-partition against current supply; set aside parts that fit only exhausted sizes and
+    // stop when nothing remaining fits an in-supply size.
+    const { fittable: placeable, unfittable: stranded } = partitionFittable(remaining, inSupply);
+    if (placeable.length === 0) break;
+    if (stranded.length > 0) {
+      supplyStranded.push(...stranded);
+      remaining = placeable;
+    }
+
+    // Under scarce supply, feed only required parts so a larger optional can't claim a sheet a
+    // required part needs; otherwise feed everything so optional parts still ride along.
+    const candidates = placementCandidates(remaining, pool, jobHasRequired);
+    // Pick this sheet's size from the in-supply candidates; null is a defensive guard.
+    const sheet = selectSheetForNextOpen(candidates, inSupply, (s) =>
+      evaluateSizeFit(candidates, s, placementKerf(config)),
+    );
+    if (!sheet) break;
+    const placed = optimize(candidates, sheet, placementKerf(config), optConfig, onProgress);
 
     if (placed.length === 0) break;
 
-    const finalized = finalizePlacement(placed, originals, config);
+    const finalized = finalizePlacement(placed, originals, config, sheet);
     if (finalized.length === 0) break;
 
-    sheets.push(buildSheetResult(finalized, sheetIndex, config));
+    sheets.push(buildSheetResult(finalized, sheetIndex, sheet));
+    pool.decrement(sheet);
 
     const placedIds = new Set(finalized.map((p) => p.part.id));
     remaining = remaining.filter((p) => !placedIds.has(p.id));
@@ -401,22 +642,47 @@ export function nestParts(
     if (jobHasRequired && !remaining.some(isRequired)) break;
   }
 
-  return buildNestingResult(sheets, restoreUnplaced(remaining, originals), config);
+  return buildNestingResult(
+    sheets,
+    restoreUnplaced([...remaining, ...supplyStranded, ...unfittable], originals),
+    topLevelDimensions(sheets, primary),
+  );
 }
 
-/** Total used material area of a result: sum over sheets of stripHeight × sheet width. Lower is denser. */
-function usedArea(result: NestingResult): number {
-  return result.sheets.reduce((sum, s) => sum + s.stripHeight * result.sheetWidth, 0);
+/**
+ * Total committed material area of a result: sum over every opened sheet of its OWN
+ * `width × height`. This is the "waste" objective — the material you must buy/cut from,
+ * regardless of how densely each sheet is packed. Lower is less waste. Using each sheet's own
+ * dimensions (not the result-level default) keeps it correct once sheet sizes can differ.
+ */
+function committedArea(result: NestingResult): number {
+  return result.sheets.reduce((sum, s) => sum + s.sheetWidth * s.sheetHeight, 0);
+}
+
+/**
+ * Total strip area of a result: sum over sheets of `stripHeight × sheet width`, using each
+ * sheet's own width. This is the density signal — how much of each sheet the packing actually
+ * occupies vertically — preserved as a lower-priority tie-break so multi-start still
+ * discriminates between equally-committed, equal-count packings.
+ */
+function stripArea(result: NestingResult): number {
+  return result.sheets.reduce((sum, s) => sum + s.stripHeight * s.sheetWidth, 0);
 }
 
 /**
  * Strict "is a strictly better nest" comparator for multi-start. Feasibility first (fewer
- * unplaced parts), then fewer sheets, then a denser pack (less used material area).
+ * unplaced parts), then least committed material area (the waste objective), then fewer sheets,
+ * then a denser pack (less total strip area). For a single uniform sheet size committed area is
+ * monotonic in sheet count, so this ordering is identical to the prior
+ * feasibility→fewer-sheets→density behavior.
  */
 export function isBetterResult(a: NestingResult, b: NestingResult): boolean {
   if (a.unplaced.length !== b.unplaced.length) return a.unplaced.length < b.unplaced.length;
+  const ca = committedArea(a);
+  const cb = committedArea(b);
+  if (ca !== cb) return ca < cb;
   if (a.sheets.length !== b.sheets.length) return a.sheets.length < b.sheets.length;
-  return usedArea(a) < usedArea(b);
+  return stripArea(a) < stripArea(b);
 }
 
 /** True area (outer minus cutouts) of a part's polygons. */
@@ -434,13 +700,18 @@ function partTrueArea(part: Part): number {
 export function sheetLowerBound(
   parts: Part[],
   quantities: Map<string, number>,
-  sheet: { width: number; height: number },
+  sheet: MaterialSheet,
 ): number {
   const sheetArea = sheet.width * sheet.height;
   if (sheetArea <= 0) return 1;
   let total = 0;
   for (const part of parts) total += partTrueArea(part) * (quantities.get(part.id) ?? 1);
   return Math.max(1, Math.ceil(total / sheetArea));
+}
+
+/** The available size with the greatest area — the size that determines the area lower bound. */
+function largestSheet(sizes: MaterialSheet[]): MaterialSheet {
+  return sizes.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
 }
 
 /** Default wall-clock budget for a full nest when the config doesn't specify one. */
@@ -473,25 +744,47 @@ export function packIntoKSheets(
   config: NestingConfig,
   k: number,
 ): NestingResult {
+  const candidateSizes = availableSheets(config);
+  const primary = candidateSizes[0];
   const optConfig = makeOptimizerConfig(config);
   const kerf = placementKerf(config);
   const sheets: SheetResult[] = [];
-  const unplaced: Part[] = [];
+  // Set permanently-unfittable parts aside up front so a group can't strand the parts that fit.
+  const { fittable, unfittable } = partitionFittable(prepared, candidateSizes);
+  const unplaced: Part[] = [...unfittable];
+  // Per-size supply shared across the K groups: a group must draw an in-supply size, and a
+  // k-packing that can't fit every group within supply simply lands parts in `unplaced` (so the
+  // caller's comparator never adopts a cap-violating result).
+  const pool = createSupplyPool(candidateSizes);
   let sheetIndex = 0;
 
-  for (const group of partitionByArea(prepared, k)) {
+  for (const group of partitionByArea(fittable, k)) {
     if (group.length === 0) continue;
-    const placed = optimize(group, config.sheet, kerf, optConfig);
-    const finalized = finalizePlacement(placed, originals, config);
+    // Choose this group's size independently (no cross-group combinatorics): the in-supply size
+    // minimizing the group's committed area, consistent with selectSheetForNextOpen.
+    const sheet = selectSheetForNextOpen(group, pool.inSupplySizes(), (s) =>
+      evaluateSizeFit(group, s, kerf),
+    );
+    if (!sheet) {
+      for (const p of group) unplaced.push(p);
+      continue;
+    }
+    const placed = optimize(group, sheet, kerf, optConfig);
+    const finalized = finalizePlacement(placed, originals, config, sheet);
     if (finalized.length > 0) {
-      sheets.push(buildSheetResult(finalized, sheetIndex, config));
+      sheets.push(buildSheetResult(finalized, sheetIndex, sheet));
+      pool.decrement(sheet);
       sheetIndex++;
     }
     const placedIds = new Set(finalized.map((p) => p.part.id));
     for (const p of group) if (!placedIds.has(p.id)) unplaced.push(p);
   }
 
-  return buildNestingResult(sheets, restoreUnplaced(unplaced, originals), config);
+  return buildNestingResult(
+    sheets,
+    restoreUnplaced(unplaced, originals),
+    topLevelDimensions(sheets, primary),
+  );
 }
 
 export interface MultiStartOptions {
@@ -529,7 +822,12 @@ export function* nestPartsMultiStartIterative(
   const budget = resolveTimeBudget(input.config, opts.timeBudgetMs);
   const maxStarts = opts.maxStarts ?? MAX_STARTS_DEFAULT;
   const deadline = now() + budget;
-  const floor = sheetLowerBound(input.parts, input.quantities, input.config.sheet);
+  const candidateSizes = availableSheets(input.config);
+  const primary = candidateSizes[0];
+  // The area lower bound is governed by the LARGEST available size (the fewest sheets any size
+  // mix could need); the sweep's bin-area guard uses the same largest area.
+  const largest = largestSheet(candidateSizes);
+  const floor = sheetLowerBound(input.parts, input.quantities, largest);
 
   // Prepared parts for the global-assignment sweep (#16): same expansion/simplification/order
   // the greedy path uses, so the two strategies nest comparable geometry.
@@ -568,7 +866,7 @@ export function* nestPartsMultiStartIterative(
       // balanced groups are smaller/easier and converge fast, and a doomed dense attempt (e.g.
       // a too-low k) fails cheaply rather than eating the restart budget.
       const sweepConfig: NestingConfig = { ...input.config, maxGenerations: SWEEP_MAX_GENERATIONS };
-      const sheetArea = input.config.sheet.width * input.config.sheet.height;
+      const sheetArea = largest.width * largest.height;
       for (let k = floor; k < best.sheets.length; k++) {
         if (now() >= deadline) break;
         // Skip a `k` whose balanced partition forces a bin past the sheet's bbox-area bound:
@@ -590,7 +888,7 @@ export function* nestPartsMultiStartIterative(
     if (starts >= maxStarts || now() >= deadline) break;
   }
 
-  return best ?? EMPTY_RESULT(input.config);
+  return best ?? EMPTY_RESULT(primary);
 }
 
 /** Synchronous multi-start: drains {@link nestPartsMultiStartIterative} to its best result. */

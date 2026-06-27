@@ -1,4 +1,5 @@
-import type { Part, NestingConfig } from '$lib/geometry/types';
+import type { Part, NestingConfig, MaterialSheet } from '$lib/geometry/types';
+import { availableSheets } from '$lib/geometry/types';
 import type { NestingResult } from '$lib/nesting/engine';
 import { deduplicateParts } from '$lib/geometry/dedup';
 import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
@@ -70,6 +71,17 @@ function createProjectStore() {
     matchTolerance: 0.01,
   });
 
+  /**
+   * Write the sheet-size list into config as the authoritative `sheets` source, keeping the
+   * legacy single `sheet` synced to the first size for back-compat reads. Always keeps ≥1 size
+   * and invalidates any stale result.
+   */
+  function commitSheetSizes(sizes: MaterialSheet[]) {
+    const safe = sizes.length > 0 ? sizes : [{ ...DEFAULT_CONFIG.sheet }];
+    state.config = { ...state.config, sheets: safe, sheet: { ...safe[0] } };
+    state.result = null;
+  }
+
   function runDedup() {
     if (state.rawParts.length === 0) return;
     const { uniqueParts, quantities } = deduplicateParts(state.rawParts, state.matchTolerance);
@@ -133,14 +145,52 @@ function createProjectStore() {
       state.result = null;
     },
 
-    setSheetWidth(widthMM: number) {
-      state.config = { ...state.config, sheet: { ...state.config.sheet, width: widthMM } };
-      state.result = null;
+    /**
+     * The authoritative list of available material sheet sizes (all dimensions in mm).
+     * Normalizes a legacy single `sheet` to a one-element list so callers always see a list.
+     */
+    get sheetSizes(): MaterialSheet[] {
+      return availableSheets(state.config);
     },
 
-    setSheetHeight(heightMM: number) {
-      state.config = { ...state.config, sheet: { ...state.config.sheet, height: heightMM } };
-      state.result = null;
+    /** Append a new size, copy-forward of the last existing size's dimensions. */
+    addSheetSize() {
+      const sizes = availableSheets(state.config);
+      const src = sizes[sizes.length - 1];
+      commitSheetSizes([...sizes, { width: src.width, height: src.height }]);
+    },
+
+    /** Remove the size at `index`, but never the last remaining one. */
+    removeSheetSize(index: number) {
+      const sizes = availableSheets(state.config);
+      if (sizes.length <= 1) return;
+      commitSheetSizes(sizes.filter((_, i) => i !== index));
+    },
+
+    /** Edit one size's width and/or height (mm). No-op for an out-of-range index. */
+    updateSheetSize(index: number, dims: { width?: number; height?: number }) {
+      const sizes = availableSheets(state.config);
+      if (index < 0 || index >= sizes.length) return;
+      commitSheetSizes(sizes.map((s, i) => (i === index ? { ...s, ...dims } : s)));
+    },
+
+    /**
+     * Set a size's "Max sheets" supply cap. `undefined`/blank clears the cap (unlimited);
+     * a value below 1 is coerced up to 1. No-op for an out-of-range index.
+     */
+    setSheetMaxCount(index: number, maxCount: number | undefined) {
+      const sizes = availableSheets(state.config);
+      if (index < 0 || index >= sizes.length) return;
+      commitSheetSizes(
+        sizes.map((s, i) => {
+          if (i !== index) return s;
+          const next: MaterialSheet = { width: s.width, height: s.height };
+          if (maxCount !== undefined && !Number.isNaN(maxCount)) {
+            next.maxCount = Math.max(1, Math.round(maxCount));
+          }
+          return next;
+        }),
+      );
     },
 
     setGenerations(n: number) {

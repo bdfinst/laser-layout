@@ -1,0 +1,4 @@
+# Run the full test suite (unit + e2e) before pushing. The per-commit hook only
+# runs unit tests; e2e is gated here because it builds and serves the app and is
+# too slow for every commit, but must pass before code reaches CI.
+npm run test:all
