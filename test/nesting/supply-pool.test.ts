@@ -90,6 +90,28 @@ describe('SupplyPool', () => {
     expect(() => pool.decrement(sizes[0])).toThrow(/already exhausted/);
   });
 
+  it('reports total remaining supply, Infinity when any size is unlimited', () => {
+    const capped = createSupplyPool([
+      { width: 1, height: 1, maxCount: 2 },
+      { width: 2, height: 2, maxCount: 3 },
+    ]);
+    expect(capped.totalRemaining()).toBe(5);
+
+    const mixed = createSupplyPool([
+      { width: 1, height: 1, maxCount: 2 },
+      { width: 2, height: 2 },
+    ]);
+    expect(mixed.totalRemaining()).toBe(Infinity);
+  });
+
+  it('lowers the total remaining as supply is consumed', () => {
+    const sizes: MaterialSheet[] = [{ width: 1, height: 1, maxCount: 2 }];
+    const pool = createSupplyPool(sizes);
+    expect(pool.totalRemaining()).toBe(2);
+    pool.decrement(sizes[0]);
+    expect(pool.totalRemaining()).toBe(1);
+  });
+
   it('rejects a size list containing the SAME object reference twice', () => {
     // The same reference would collapse to one index and miscount supply, so it is rejected.
     const shared: MaterialSheet = { width: 100, height: 100 };

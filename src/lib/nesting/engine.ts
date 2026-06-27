@@ -18,7 +18,7 @@ import { bottomLeftFill } from './placement';
 import { polygonsInterpenetrate } from './nfp';
 import { boundingBox, polygonArea, getPlacedPolygons } from '$lib/geometry/polygon';
 import { simplifyPolygon } from '$lib/geometry/simplify';
-import { createSupplyPool } from './supply-pool';
+import { createSupplyPool, type SupplyPool } from './supply-pool';
 
 export interface NestingInput {
   parts: Part[];
@@ -45,6 +45,20 @@ export interface NestingProgress {
 /** A part is required unless it explicitly opts into the "optional" quantity priority (#43). */
 function isRequired(part: Part): boolean {
   return (part.priority ?? 'required') === 'required';
+}
+
+/**
+ * The parts to feed to the next sheet's placement, applying priority-first allocation under scarce
+ * supply. When supply can't comfortably cover every still-unplaced required part (total remaining
+ * sheets ≤ remaining required parts), hold optional parts back so a larger optional can't claim a
+ * scarce sheet a required part needs — required parts must win the scarce supply. When supply is
+ * ample (or unlimited), feed everything so optional parts still ride along on the same sheets.
+ */
+function placementCandidates(remaining: Part[], pool: SupplyPool, jobHasRequired: boolean): Part[] {
+  if (!jobHasRequired) return remaining;
+  const required = remaining.filter(isRequired);
+  if (required.length === 0) return remaining;
+  return pool.totalRemaining() <= required.length ? required : remaining;
 }
 
 function expandParts(parts: Part[], quantities: Map<string, number>): Part[] {
@@ -93,6 +107,29 @@ function withOriginalGeometry(placed: PlacedPart[], originals: Map<string, Part>
 
 function restoreUnplaced(remaining: Part[], originals: Map<string, Part>): Part[] {
   return remaining.map((p) => originals.get(p.id) ?? p);
+}
+
+/**
+ * Make a simplified-geometry placement safe to DISPLAY/EXPORT on full-fidelity outlines — the
+ * single correctness gate shared by the live-preview path and the per-sheet finalize.
+ *
+ * The GA searches RDP-simplified shapes, so a placement that is collision-free on the simplified
+ * outlines can interpenetrate once the original geometry is restored: the simplified outline can
+ * sit up to its RDP tolerance (~1% of the bbox, which exceeds the kerf on large parts) inside the
+ * real one, worst near 45° rotations where the bbox — and thus the tolerance — is largest. Swap
+ * the original geometry in; only when that actually interpenetrates fall back via `onOverlap`
+ * (the preview re-shows its last known-good frame; finalize re-seats deterministically). The fast
+ * common path — no overlap — returns the plain geometry swap unchanged, so it stays byte-for-byte
+ * identical. The check is a bbox-prefiltered concave interpenetration test, cheap enough to run on
+ * every progress frame.
+ */
+function displaySafe(
+  placed: PlacedPart[],
+  originals: Map<string, Part>,
+  onOverlap: () => PlacedPart[],
+): PlacedPart[] {
+  const swapped = withOriginalGeometry(placed, originals);
+  return anyInterpenetration(swapped) ? onOverlap() : swapped;
 }
 
 /**
@@ -148,10 +185,10 @@ function finalizePlacement(
   // Otherwise the cheap geometry swap is correct UNLESS the simplification slack (RDP tolerance
   // is ~1% of the bbox, which exceeds the kerf on large parts) lets the full-fidelity outlines
   // interpenetrate where the simplified ones only touched — exactly what the tight NFP feasible
-  // seats (#26) expose. Re-seat only when that actually happens, so density-optimal nests keep
-  // the GA's NFP packing and only a genuinely overlapping sheet pays for the deterministic refill.
-  const swapped = withOriginalGeometry(placed, originals);
-  return anyInterpenetration(swapped) ? reseat() : swapped;
+  // seats (#26) expose. The shared display gate re-seats only when that actually happens, so
+  // density-optimal nests keep the GA's NFP packing and only a genuinely overlapping sheet pays
+  // for the deterministic refill — the same correctness gate the live preview uses.
+  return displaySafe(placed, originals, reseat);
 }
 
 /** True if any two placed parts' full-fidelity outer outlines interpenetrate (bbox-prefiltered). */
@@ -191,13 +228,18 @@ function bboxArea(part: Part): number {
   return bb.width * bb.height;
 }
 
-/** True if a part's bounding box fits a sheet in either 90° orientation. */
+/**
+ * True if a part's bounding box fits a sheet. A free part is fittable in either 90° orientation;
+ * a grain-constrained part may only rotate 0°/180° (its bbox is fixed), so the rotated orientation
+ * is never available to it and must not count toward fittability — otherwise a tall grain part
+ * that fits a size only when rotated is wrongly classified fittable and gets stranded by the
+ * placement loop. (`lockOrientation` only forbids mirroring, which never changes axis fit.)
+ */
 function partFitsSheet(part: Part, sheet: MaterialSheet): boolean {
   const bb = boundingBox(part.polygons[0]);
-  return (
-    (bb.width <= sheet.width && bb.height <= sheet.height) ||
-    (bb.height <= sheet.width && bb.width <= sheet.height)
-  );
+  const fitsUpright = bb.width <= sheet.width && bb.height <= sheet.height;
+  if (part.grainConstraint) return fitsUpright;
+  return fitsUpright || (bb.height <= sheet.width && bb.width <= sheet.height);
 }
 
 /**
@@ -459,31 +501,36 @@ export function* nestPartsIterative(
       remaining = placeable;
     }
 
+    // Under scarce supply, feed only required parts so a larger optional can't claim a sheet a
+    // required part needs; otherwise feed everything so optional parts still ride along.
+    const candidates = placementCandidates(remaining, pool, jobHasRequired);
     // Pick this sheet's size from the in-supply candidates for the remaining placeable parts;
     // null is a defensive guard — every placeable part fits ≥1 in-supply size.
-    const sheet = selectSheetForNextOpen(remaining, inSupply, (s) =>
-      evaluateSizeFit(remaining, s, placementKerf(config)),
+    const sheet = selectSheetForNextOpen(candidates, inSupply, (s) =>
+      evaluateSizeFit(candidates, s, placementKerf(config)),
     );
     if (!sheet) break;
-    const gen = optimizeIterative(remaining, sheet, placementKerf(config), optConfig);
+    const gen = optimizeIterative(candidates, sheet, placementKerf(config), optConfig);
     // eslint-disable-next-line no-useless-assignment
     let lastPlacement: PlacedPart[] = [];
+    // Last full-fidelity placement proven safe to draw — the fallback when an intermediate
+    // candidate would interpenetrate once its original geometry is restored (see displaySafe).
+    let lastSafeDisplay: PlacedPart[] = [];
 
     let iter: IteratorResult<OptimizeProgress, PlacedPart[]>;
     do {
       iter = gen.next();
       if (!iter.done) {
         lastPlacement = iter.value.bestPlacement;
-        // Build intermediate result showing current sheet progress
-        const currentSheet = buildSheetResult(
-          withOriginalGeometry(lastPlacement, originals),
-          sheetIndex,
-          sheet,
-        );
+        // Build intermediate result showing current sheet progress on full-fidelity geometry,
+        // guaranteed overlap-free for display (falls back to the last known-good frame).
+        const display = displaySafe(lastPlacement, originals, () => lastSafeDisplay);
+        lastSafeDisplay = display;
+        const currentSheet = buildSheetResult(display, sheetIndex, sheet);
         const intermediateSheets = [...sheets, currentSheet];
-        const placedIds = new Set(lastPlacement.map((p) => p.part.id));
+        const placedIds = new Set(display.map((p) => p.part.id));
         const unplaced = restoreUnplaced(
-          [...remaining.filter((p) => !placedIds.has(p.id)), ...unfittable],
+          [...remaining.filter((p) => !placedIds.has(p.id)), ...supplyStranded, ...unfittable],
           originals,
         );
 
@@ -569,12 +616,15 @@ export function nestParts(
       remaining = placeable;
     }
 
+    // Under scarce supply, feed only required parts so a larger optional can't claim a sheet a
+    // required part needs; otherwise feed everything so optional parts still ride along.
+    const candidates = placementCandidates(remaining, pool, jobHasRequired);
     // Pick this sheet's size from the in-supply candidates; null is a defensive guard.
-    const sheet = selectSheetForNextOpen(remaining, inSupply, (s) =>
-      evaluateSizeFit(remaining, s, placementKerf(config)),
+    const sheet = selectSheetForNextOpen(candidates, inSupply, (s) =>
+      evaluateSizeFit(candidates, s, placementKerf(config)),
     );
     if (!sheet) break;
-    const placed = optimize(remaining, sheet, placementKerf(config), optConfig, onProgress);
+    const placed = optimize(candidates, sheet, placementKerf(config), optConfig, onProgress);
 
     if (placed.length === 0) break;
 

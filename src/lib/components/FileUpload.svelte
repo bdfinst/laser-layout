@@ -1,6 +1,6 @@
 <script lang="ts">
   import { parseSVG } from '$lib/parsers/svg-parser';
-  import { parseLightBurn } from '$lib/parsers/lightburn-parser';
+  import { parseLightBurnWithDiagnostics, summarizeSkipped } from '$lib/parsers/lightburn-parser';
   import { projectStore } from '$lib/stores/project.svelte';
   import { MAX_FILE_SIZE } from '$lib/parsers/constants';
   import { tooltip } from '$lib/actions/tooltip';
@@ -19,12 +19,17 @@
       const text = reader.result as string;
       const name = file.name;
       let parts;
+      // Human-readable note about shapes the parser could not import, so a
+      // zero/partial result explains itself instead of failing silently.
+      let skipNote: string | null = null;
 
       try {
         if (name.endsWith('.svg')) {
           parts = parseSVG(text);
         } else if (name.endsWith('.lbrn') || name.endsWith('.lbrn2')) {
-          parts = parseLightBurn(text);
+          const result = parseLightBurnWithDiagnostics(text);
+          parts = result.parts;
+          skipNote = summarizeSkipped(result.diagnostics);
         } else {
           alert('Unsupported file format. Please use .svg, .lbrn, or .lbrn2');
           return;
@@ -36,8 +41,12 @@
       }
 
       if (parts.length === 0) {
-        alert('No parts found in file.');
+        alert(skipNote ? `No parts imported. ${skipNote}.` : 'No parts found in file.');
         return;
+      }
+
+      if (skipNote) {
+        alert(`Imported ${parts.length} part${parts.length === 1 ? '' : 's'}. ${skipNote}.`);
       }
 
       projectStore.setParts(parts, name);

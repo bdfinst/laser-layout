@@ -20,6 +20,13 @@ import { bottomLeftFill } from '$lib/nesting/placement';
 import { makeRect as makePart } from '../support/parts';
 import { seedRandom, restoreRandom } from '../support/seeded-random';
 import { availableSheets, type NestingConfig } from '$lib/geometry/types';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { parseLightBurn } from '$lib/parsers/lightburn-parser';
+import { groupByContainment, removeCoincidentDuplicates } from '$lib/geometry/grouping';
+import { deduplicateParts } from '$lib/geometry/dedup';
+import { getPlacedPolygons } from '$lib/geometry/polygon';
+import { polygonsInterpenetrate } from '$lib/nesting/nfp';
 
 const fastConfig: NestingConfig = {
   sheet: { width: 100, height: 100 },
@@ -981,6 +988,117 @@ describe('lower bound + multi-start sweep over the size set (Slice 3.2)', () => 
   });
 });
 
+describe('progress frames include supply-stranded parts (follow-up 1)', () => {
+  it('reports a supply-stranded part in the intermediate progress unplaced count', () => {
+    // Size A (100×100) is born exhausted (cap 0); size B (40×40) is available. 'big' (50×50)
+    // fits only A, so once A is exhausted it is supply-stranded; 'small' (30×30) nests on B and
+    // drives the progress yields. While B is being packed, the live unplaced count must already
+    // include the stranded 'big' (it does in the final result; the intermediate frames must agree).
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [
+        { width: 100, height: 100, maxCount: 0 },
+        { width: 40, height: 40 },
+      ],
+    };
+    const parts = [makePart('big', 50, 50), makePart('small', 30, 30)];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+
+    const gen = nestPartsIterative({ parts, quantities: q, config });
+    const frames: NestingResult[] = [];
+    let iter = gen.next();
+    while (!iter.done) {
+      frames.push(iter.value.result);
+      iter = gen.next();
+    }
+
+    expect(frames.length).toBeGreaterThan(0);
+    // Every intermediate frame must already account for the stranded 'big'.
+    expect(frames.every((f) => f.unplaced.some((p) => p.id.includes('big')))).toBe(true);
+    // Sanity: the final result also reports it (already true today).
+    expect(iter.value.unplaced.some((p) => p.id.includes('big'))).toBe(true);
+  });
+});
+
+describe('fittability respects grainConstraint (follow-up 2)', () => {
+  // A 40×180 part fits a 200×50 size ONLY when rotated 90°, and a 50×200 size ONLY at 0°.
+  const sheets = [
+    { width: 200, height: 50 },
+    { width: 50, height: 200 },
+  ];
+
+  it('classifies a grain-constrained part by its 0°/180° bbox, not a rotated fit', () => {
+    // Grain-constrained ⇒ only 0°/180° allowed, so the part can never use the 200×50 rotated fit.
+    // Fittability must therefore pick the 50×200 size where it fits upright; misclassifying it as
+    // fitting the 200×50 strands it (the GA can't rotate it to fit there).
+    const grain = makePart('g', 40, 180, { grainConstraint: true });
+    const res = nestParts({
+      parts: [grain],
+      quantities: new Map([['g', 1]]),
+      config: { ...fastConfig, sheets },
+    });
+
+    expect(res.totalPlaced).toBe(1);
+    expect(res.unplaced).toHaveLength(0);
+    expect(res.sheets[0].sheetWidth).toBe(50);
+    expect(res.sheets[0].sheetHeight).toBe(200);
+  });
+
+  it('control: a non-constrained part of the same shape still fits via rotation', () => {
+    const free = makePart('n', 40, 180);
+    const res = nestParts({
+      parts: [free],
+      quantities: new Map([['n', 1]]),
+      config: { ...fastConfig, sheets },
+    });
+    expect(res.totalPlaced).toBe(1);
+    expect(res.unplaced).toHaveLength(0);
+  });
+});
+
+describe('priority-aware scarce allocation (follow-up 3)', () => {
+  it('a smaller REQUIRED part wins the last scarce sheet over a larger OPTIONAL part', () => {
+    // Single size, cap 1: only one part fits per sheet (90+40 > 100 either way). A larger optional
+    // (90×90) and a smaller required (40×40) compete for the one available sheet. Pure area-greedy
+    // ordering would seat the denser optional; under scarce supply the required part must win.
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 100, height: 100, maxCount: 1 }],
+    };
+    const parts = [
+      makePart('opt', 90, 90, { priority: 'optional' }),
+      makePart('req', 40, 40, { priority: 'required' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(1);
+    expect(res.totalPlaced).toBe(1);
+    const placed = res.sheets.flatMap((s) => s.placed.map((pp) => pp.part));
+    expect(placed.every((p) => (p.priority ?? 'required') === 'required')).toBe(true);
+    expect(res.unplaced.map((p) => p.id)).toContain('opt_0');
+  });
+
+  it('still rides optional parts along when capped supply is ample (not scarce)', () => {
+    // cap 5 but the job needs one sheet; supply is not scarce, so the optional part rides along on
+    // the same wide sheet as the required one (ride-along must survive the priority-first change).
+    const config: NestingConfig = {
+      ...fastConfig,
+      sheets: [{ width: 200, height: 100, maxCount: 5 }],
+    };
+    const parts = [
+      makePart('R', 90, 90, { priority: 'required' }),
+      makePart('O', 90, 90, { priority: 'optional' }),
+    ];
+    const q = new Map(parts.map((p) => [p.id, 1]));
+    const res = nestParts({ parts, quantities: q, config });
+
+    expect(res.sheets).toHaveLength(1);
+    expect(res.totalPlaced).toBe(2);
+    expect(res.unplaced).toHaveLength(0);
+  });
+});
+
 describe('per-size supply caps + exhaustion (Slice 4)', () => {
   // Full-width 100x60 strips: two never stack on a 100x100 sheet (60+60 > 100) and never sit
   // side by side (100+100 > 100), so each sheet holds exactly one — geometry-forced, GA-proof.
@@ -1134,5 +1252,101 @@ describe('per-size supply caps + exhaustion (Slice 4)', () => {
     expect(sizeCounts(res).get('100x100')).toBe(8);
     expect(res.unplaced).toHaveLength(0);
     expect(res.totalPlaced).toBe(8);
+  });
+});
+
+describe('preview frames are overlap-free on full-fidelity geometry (triage)', () => {
+  // The GA searches RDP-simplified outlines and the engine swaps the full-fidelity geometry back
+  // in for display. Intermediate PROGRESS frames are emitted before the finalize/re-seat, so a
+  // mid-search candidate that is collision-free on simplified shapes can be DRAWN overlapping on
+  // full-fidelity shapes (transient, near 45° rotations). Seed 7 on lego-shelves produced a
+  // ~0.295 mm corner interpenetration in one such intermediate frame.
+  const xml = readFileSync(resolve('test-fixtures/lego-shelves.lbrn2'), 'utf-8');
+  const { uniqueParts: legoParts, quantities: legoQuantities } = deduplicateParts(
+    groupByContainment(removeCoincidentDuplicates(parseLightBurn(xml))),
+  );
+  const nfpConfig: NestingConfig = {
+    sheet: { width: 508, height: 762 },
+    kerf: 1,
+    rotationSteps: 72,
+    populationSize: 30,
+    generations: 40,
+    useNfpPlacement: true,
+    commonLineCutting: false,
+    timeBudgetMs: 12000,
+  };
+
+  /** True if any two placed parts' full-fidelity outer outlines interpenetrate in a result. */
+  function frameInterpenetrates(result: NestingResult): boolean {
+    for (const sheet of result.sheets) {
+      const polys = sheet.placed.map((pp) => getPlacedPolygons(pp)[0]);
+      for (let i = 0; i < polys.length; i++) {
+        for (let j = i + 1; j < polys.length; j++) {
+          if (polygonsInterpenetrate(polys[i], polys[j])) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  it('no intermediate preview frame interpenetrates for the known overlap seed (7)', () => {
+    seedRandom(7);
+    const gen = nestPartsIterative({
+      parts: legoParts,
+      quantities: legoQuantities,
+      config: nfpConfig,
+    });
+    let frames = 0;
+    let iter = gen.next();
+    while (!iter.done) {
+      frames++;
+      expect(frameInterpenetrates(iter.value.result)).toBe(false);
+      iter = gen.next();
+    }
+    expect(frames).toBeGreaterThan(0);
+  }, 90_000);
+
+  // The guard must be a NO-OP for the common (non-overlapping) case: a job of rectangles is never
+  // simplified (≤10 vertices) so the full-fidelity swap can never interpenetrate, and the
+  // preview frames must remain byte-for-byte the raw optimizer placement — never a fallback frame.
+  it('does not alter preview frames for a non-overlapping job (byte-equivalent to the raw swap)', () => {
+    const cfg: NestingConfig = { ...fastConfig };
+    // 'a' (1600) sorts ahead of 'b' (900), so the expanded/sorted candidate order matches the
+    // raw optimizer input order below; rects pass through simplification unchanged.
+    const parts = [makePart('a', 40, 40), makePart('b', 30, 30)];
+    const q = new Map([
+      ['a', 1],
+      ['b', 1],
+    ]);
+    const transforms = (placed: { x: number; y: number; rotation: number; mirror?: boolean }[]) =>
+      placed.map((p) => ({ x: p.x, y: p.y, rotation: p.rotation, mirror: p.mirror ?? false }));
+
+    seedRandom(7);
+    const engine = nestPartsIterative({ parts, quantities: q, config: cfg });
+    const engineFrames: ReturnType<typeof transforms>[] = [];
+    for (const prog of engine) {
+      engineFrames.push(transforms(prog.result.sheets[prog.currentSheet]?.placed ?? []));
+    }
+
+    seedRandom(7);
+    const sheet = availableSheets(cfg)[0];
+    const optConfig = makeOptimizerConfig(cfg);
+    const rawGen = optimizeIterative(
+      [makePart('a', 40, 40), makePart('b', 30, 30)],
+      sheet,
+      cfg.kerf,
+      optConfig,
+    );
+    const rawFrames: ReturnType<typeof transforms>[] = [];
+    let it = rawGen.next();
+    while (!it.done) {
+      rawFrames.push(transforms(it.value.bestPlacement));
+      it = rawGen.next();
+    }
+
+    expect(engineFrames.length).toBeGreaterThan(0);
+    // Not a stale/empty fallback frame — the very first frame already reflects current placement.
+    expect(engineFrames[0].length).toBeGreaterThan(0);
+    expect(engineFrames).toEqual(rawFrames);
   });
 });

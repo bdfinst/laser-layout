@@ -1,7 +1,7 @@
 ---
 id: nest-preview-transiently-shows-overlapping-parts
 created: 2026-06-27T02:55:54Z
-status: open
+status: resolved
 ---
 
 # Nest preview transiently shows overlapping parts (full-fidelity render of a simplified-geometry candidate)
@@ -75,9 +75,9 @@ correctness gate.
 
 ## Acceptance Criteria
 
-- [ ] Root cause is addressed: intermediate preview frames are non-overlapping,
+- [x] Root cause is addressed: intermediate preview frames are non-overlapping,
       not merely the final result
-- [ ] All new tests pass (including the per-frame non-interpenetration assertion)
-- [ ] Existing tests still pass (final-result full-fidelity-overlap regression)
-- [ ] No regressions introduced — non-overlapping runs render identical previews
+- [x] All new tests pass (including the per-frame non-interpenetration assertion)
+- [x] Existing tests still pass (final-result full-fidelity-overlap regression)
+- [x] No regressions introduced — non-overlapping runs render identical previews
       and the per-generation cost stays acceptable

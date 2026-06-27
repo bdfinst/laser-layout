@@ -17,6 +17,8 @@ export interface SupplyPool {
   decrement(sheet: MaterialSheet): void;
   /** True when no size has any remaining supply. */
   isExhausted(): boolean;
+  /** Total remaining supply across all sizes; `Infinity` when any size is unlimited. */
+  totalRemaining(): number;
 }
 
 /** Build a {@link SupplyPool} from an available-size list (omitted `maxCount` ⇒ unlimited). */
@@ -38,5 +40,6 @@ export function createSupplyPool(sizes: MaterialSheet[]): SupplyPool {
       remaining[i] -= 1;
     },
     isExhausted: () => remaining.every((r) => r <= 0),
+    totalRemaining: () => remaining.reduce((sum, r) => sum + r, 0),
   };
 }

@@ -461,7 +461,9 @@ Steps 3.1, 3.2, 4.1 are `complex` (core algorithm, feasibility/termination seman
 - Intermediate progress frames omit `supplyStranded` from the live `unplaced` count (the final result is correct); preview-only cosmetic under-report once a size exhausts mid-nest.
 - `partFitsSheet` (fittability prefilter) uses bbox in both 90° orientations and ignores `grainConstraint`/`lockOrientation`; a grain-locked part that fits only when rotated is classified fittable but correctly ends in `unplaced` via the empty-placement break guards (no loop). Optimistic-bound approximation.
 - Non-priority-aware allocation: when a larger `optional` part competes with a smaller `required` part for one scarce capped sheet, allocation isn't guaranteed priority-first (the spec only requires optional parts not force new sheets).
-- Density (NFP) mode + many sizes can hit the time budget mid-pack and return a best-so-far partial; consistent with the documented density-first tradeoff.
+- Density (NFP) mode + many sizes can hit the time budget mid-pack and return a best-so-far partial; consistent with the documented density-first tradeoff. **Resolved: accepted, no change** — verified per-opened-sheet size selection is GA-free (`evaluateSizeFit` bbox prefilter) with exactly one GA per opened sheet; the cost is the per-sheet GA itself, not multi-size selection, so the budget partial is inherent to density mode and not introduced by mixing.
+
+_Status: follow-ups 1–3 implemented; 4 accepted (above)._
 
 ## Build Progress
 

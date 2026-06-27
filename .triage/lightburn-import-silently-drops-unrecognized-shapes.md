@@ -1,7 +1,7 @@
 ---
 id: lightburn-import-silently-drops-unrecognized-shapes
 created: 2026-06-27T02:55:54Z
-status: open
+status: resolved
 ---
 
 # LightBurn import silently drops unrecognized shapes (multi-layer groups, broken/open lines)
@@ -103,9 +103,9 @@ path feed a single diagnostics channel, keeping `processShape` readable.
 
 ## Acceptance Criteria
 
-- [ ] Root cause is addressed (not just symptom): broken/open outlines import,
+- [x] Root cause is addressed (not just symptom): broken/open outlines import,
       layer filtering cannot zero out the result, and drops are reported
-- [ ] All new tests pass
-- [ ] Existing tests still pass (LineClosed, groups, pool, XForm, Rect/Ellipse)
-- [ ] No regressions introduced — a valid multi-shape file imports the same
+- [x] All new tests pass
+- [x] Existing tests still pass (LineClosed, groups, pool, XForm, Rect/Ellipse)
+- [x] No regressions introduced — a valid multi-shape file imports the same
       parts as before, now with a diagnostics summary
