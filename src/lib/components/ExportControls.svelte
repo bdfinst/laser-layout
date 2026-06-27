@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { projectStore } from '$lib/stores/project.svelte';
-  import { exportToSVG } from '$lib/exporters/svg-exporter';
-  import { exportToLightBurn } from '$lib/exporters/lightburn-exporter';
+  import { exportSheetsToSVG } from '$lib/exporters/svg-exporter';
+  import { exportSheetsToLightBurn } from '$lib/exporters/lightburn-exporter';
   import { tooltip } from '$lib/actions/tooltip';
   import {
     runParallelNest,
@@ -99,25 +99,17 @@
     const result = projectStore.state.result;
     if (!result) return;
 
-    // Match export edge-merging to how the layout was nested (#43).
+    // Match export edge-merging to how the layout was nested (#43). Each sheet is sized by its
+    // own dimensions (#26) — the helpers read per-sheet width/height, not the result default.
     const commonLineCutting = projectStore.state.config.commonLineCutting ?? false;
 
-    for (const sheet of result.sheets) {
-      const suffix = result.sheets.length > 1 ? `-sheet-${sheet.sheetIndex + 1}` : '';
-      if (exportFormat === 'svg') {
-        const content = exportToSVG(sheet.placed, {
-          sheetWidth: result.sheetWidth,
-          sheetHeight: result.sheetHeight,
-          commonLineCutting,
-        });
-        downloadFile(content, `nested-layout${suffix}.svg`, 'image/svg+xml');
-      } else {
-        const content = exportToLightBurn(sheet.placed, {
-          sheetWidth: result.sheetWidth,
-          sheetHeight: result.sheetHeight,
-          commonLineCutting,
-        });
-        downloadFile(content, `nested-layout${suffix}.lbrn2`, 'application/xml');
+    if (exportFormat === 'svg') {
+      for (const file of exportSheetsToSVG(result, { commonLineCutting })) {
+        downloadFile(file.content, file.filename, 'image/svg+xml');
+      }
+    } else {
+      for (const file of exportSheetsToLightBurn(result, { commonLineCutting })) {
+        downloadFile(file.content, file.filename, 'application/xml');
       }
     }
   }

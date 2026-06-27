@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { rehydrateQuantities, runWorkerLoop, handleMessage } from '$lib/nesting/nesting-worker';
 import type { WorkerResponse, WorkerMessage } from '$lib/nesting/nesting-worker';
 import type { NestingInput, NestingProgress, NestingResult } from '$lib/nesting/engine';
+import { serializeNestingInput } from '$lib/nesting/worker-io';
+import { availableSheets, type MaterialSheet, type Part } from '$lib/geometry/types';
 
 // ── runWorkerLoop test harness ──────────────────────────────────────────────
 // Injected post/now/schedule/run fakes — no real Worker, clock, or setTimeout.
@@ -209,6 +211,106 @@ describe('handleMessage', () => {
     handleMessage({ type: 'start', input: inputWithBudget(60000) }, deps);
 
     expect(posts).toEqual([{ type: 'done', result: final, starts: 0 }]);
+  });
+});
+
+// ── Slice 5: heterogeneous-sheet config survives the worker boundary ─────────
+// The wire form is produced by serializeNestingInput (main thread) and consumed by
+// runWorkerLoop (worker). These assert the new sheets[]/maxCount fields reach the engine
+// intact, and that a legacy single-sheet message still rehydrates and nests on that size.
+
+function squarePart(size: number): Part {
+  return {
+    id: 'sq',
+    name: 'square',
+    sourceIndex: 0,
+    polygons: [
+      [
+        { x: 0, y: 0 },
+        { x: size, y: 0 },
+        { x: size, y: size },
+        { x: 0, y: size },
+      ],
+    ],
+  };
+}
+
+function drive(
+  input: NestingInput,
+  run?: (i: NestingInput) => Generator<NestingProgress, NestingResult>,
+) {
+  const posts: WorkerResponse[] = [];
+  const queue: (() => void)[] = [];
+  runWorkerLoop(input, {
+    post: (m) => posts.push(m),
+    now: () => 0,
+    schedule: (fn) => queue.push(fn),
+    ...(run ? { run } : {}),
+  });
+  // Synchronously drain scheduled continuations (no real timer/Worker).
+  for (let guard = 0; queue.length > 0 && guard < 10_000; guard++) {
+    queue.shift()!();
+  }
+  return posts;
+}
+
+describe('worker boundary: heterogeneous sheet config', () => {
+  it('delivers both sheet sizes with their caps to the engine after serialize + rehydrate', () => {
+    let seen: MaterialSheet[] | null = null;
+    // eslint-disable-next-line require-yield
+    function* capture(i: NestingInput): Generator<NestingProgress, NestingResult> {
+      seen = availableSheets(i.config);
+      return makeResult(0);
+    }
+
+    const wire = serializeNestingInput({
+      parts: [],
+      quantities: new Map(),
+      config: {
+        sheet: { width: 600, height: 350 },
+        kerf: 1,
+        rotationSteps: 4,
+        populationSize: 5,
+        generations: 5,
+        sheets: [
+          { width: 600, height: 350, maxCount: 3 },
+          { width: 500, height: 400 }, // unlimited
+        ],
+      },
+    });
+
+    drive(wire as unknown as NestingInput, capture);
+
+    expect(seen).toEqual([
+      { width: 600, height: 350, maxCount: 3 },
+      { width: 500, height: 400 },
+    ]);
+  });
+
+  it('rehydrates a legacy single-sheet message and nests onto that 600x350 size', () => {
+    const wire = serializeNestingInput({
+      parts: [squarePart(50)],
+      quantities: new Map([['sq', 1]]),
+      config: {
+        sheet: { width: 600, height: 350 },
+        kerf: 1,
+        rotationSteps: 1,
+        populationSize: 2,
+        generations: 1,
+        timeBudgetMs: 2000,
+      },
+    });
+
+    const posts = drive(wire as unknown as NestingInput);
+    const done = posts.find((m) => m.type === 'done');
+
+    expect(done).toBeDefined();
+    const result = (done as Extract<WorkerResponse, { type: 'done' }>).result;
+    expect(result.sheets.length).toBeGreaterThan(0);
+    for (const sheet of result.sheets) {
+      expect(sheet.sheetWidth).toBe(600);
+      expect(sheet.sheetHeight).toBe(350);
+    }
   });
 });
 

@@ -62,10 +62,10 @@
         min={minMM}
         step={mmStep}
         value={mmValue}
-        aria-labelledby="{id}-label"
+        aria-labelledby="{id}-label {id}-mm-unit"
         onchange={commitMm}
       />
-      <span class="unit">mm</span>
+      <span class="unit" id="{id}-mm-unit">mm</span>
     </span>
     <span class="unit-input">
       <input
@@ -74,10 +74,10 @@
         min={toDisplayUnits(minMM, 'in')}
         step={inStep}
         value={inValue}
-        aria-labelledby="{id}-label"
+        aria-labelledby="{id}-label {id}-in-unit"
         onchange={commitIn}
       />
-      <span class="unit">in</span>
+      <span class="unit" id="{id}-in-unit">in</span>
     </span>
   </div>
 </div>

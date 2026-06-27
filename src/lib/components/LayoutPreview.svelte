@@ -48,18 +48,27 @@
         <div class="sheet-header">
           <span class="sheet-title">Sheet {sheet.sheetIndex + 1}</span>
           <span class="sheet-stat">Parts: {sheet.placed.length}</span>
+          <span class="sheet-stat"
+            >Size: {fmtDim(sheet.sheetWidth)} × {fmtDim(sheet.sheetHeight)}</span
+          >
           <span class="sheet-stat">Strip: {fmtDim(sheet.stripHeight)}</span>
           <span class="sheet-stat">Use: {(sheet.utilization * 100).toFixed(1)}%</span>
         </div>
         <div class="svg-wrapper">
           <svg
-            viewBox="0 0 {result.sheetWidth} {result.sheetHeight}"
+            viewBox="0 0 {sheet.sheetWidth} {sheet.sheetHeight}"
             xmlns="http://www.w3.org/2000/svg"
             class="layout-svg"
           >
             <defs>
               <!-- Neon glow: blur a copy of the stroke and lay the crisp stroke on top. -->
-              <filter id="laser-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <filter
+                id="laser-glow-{sheet.sheetIndex}"
+                x="-20%"
+                y="-20%"
+                width="140%"
+                height="140%"
+              >
                 <feGaussianBlur stdDeviation="0.6" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
@@ -80,8 +89,8 @@
             <rect
               x="0"
               y="0"
-              width={result.sheetWidth}
-              height={result.sheetHeight}
+              width={sheet.sheetWidth}
+              height={sheet.sheetHeight}
               fill="#0a0f17"
               stroke="#2b3d53"
               stroke-width="0.5"
@@ -89,16 +98,16 @@
             <rect
               x="0"
               y="0"
-              width={result.sheetWidth}
-              height={result.sheetHeight}
+              width={sheet.sheetWidth}
+              height={sheet.sheetHeight}
               fill="url(#sheet-grid-{sheet.sheetIndex})"
             />
 
-            {#if sheet.stripHeight > 0 && sheet.stripHeight < result.sheetHeight}
+            {#if sheet.stripHeight > 0 && sheet.stripHeight < sheet.sheetHeight}
               <line
                 x1="0"
                 y1={sheet.stripHeight}
-                x2={result.sheetWidth}
+                x2={sheet.sheetWidth}
                 y2={sheet.stripHeight}
                 stroke="#ff3b6b"
                 stroke-width="0.3"
@@ -106,8 +115,8 @@
               />
             {/if}
 
-            <g filter="url(#laser-glow)">
-              {#each sheet.placed as pp, i (pp.part.id)}
+            <g filter="url(#laser-glow-{sheet.sheetIndex})">
+              {#each sheet.placed as pp, i (`${pp.part.id}:${i}`)}
                 {@const polygons = getPlacedPolygons(pp)}
                 {#each polygons as poly, polyIdx (polyIdx)}
                   <path

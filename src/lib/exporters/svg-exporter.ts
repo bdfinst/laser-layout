@@ -1,7 +1,8 @@
-import type { PlacedPart } from '$lib/geometry/types';
+import type { PlacedPart, SheetResult } from '$lib/geometry/types';
 import { getPlacedPolygons, toSVGPathD } from '$lib/geometry/polygon';
 import { escapeXml } from './xml-utils';
 import { dedupeCommonLineEdges } from './common-line';
+import { sheetExportFilename, type SheetExportFile } from './sheet-export';
 
 export interface SVGExportOptions {
   sheetWidth: number;
@@ -62,4 +63,25 @@ export function exportToSVG(placed: PlacedPart[], options: SVGExportOptions): st
 
   lines.push('</svg>');
   return lines.join('\n');
+}
+
+/** Options shared across every sheet of a multi-sheet SVG export (no per-sheet size). */
+export type SheetSVGExportOptions = Omit<SVGExportOptions, 'sheetWidth' | 'sheetHeight'>;
+
+/**
+ * Export every sheet of a nesting result to its own SVG, each sized by that sheet's own
+ * dimensions (#26). Returns one {@link SheetExportFile} per sheet.
+ */
+export function exportSheetsToSVG(
+  result: { sheets: SheetResult[] },
+  options: SheetSVGExportOptions = {},
+): SheetExportFile[] {
+  return result.sheets.map((sheet) => ({
+    filename: sheetExportFilename(sheet.sheetIndex, result.sheets.length, 'svg'),
+    content: exportToSVG(sheet.placed, {
+      ...options,
+      sheetWidth: sheet.sheetWidth,
+      sheetHeight: sheet.sheetHeight,
+    }),
+  }));
 }

@@ -1,8 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  plugins: [sveltekit()],
+  // svelteTesting resolves Svelte's browser build and auto-cleans the DOM between
+  // component tests (test-only; it no-ops outside vitest).
+  plugins: [sveltekit(), svelteTesting()],
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'jsdom',

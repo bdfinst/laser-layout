@@ -1,7 +1,8 @@
-import type { PlacedPart, Point, Polygon } from '$lib/geometry/types';
+import type { PlacedPart, Point, Polygon, SheetResult } from '$lib/geometry/types';
 import { getPlacedPolygons } from '$lib/geometry/polygon';
 import { escapeXml } from './xml-utils';
 import { dedupeCommonLineEdges, COMMON_LINE_TOLERANCE } from './common-line';
+import { sheetExportFilename, type SheetExportFile } from './sheet-export';
 
 export interface LightBurnExportOptions {
   sheetWidth: number;
@@ -60,6 +61,30 @@ export function exportToLightBurn(placed: PlacedPart[], options: LightBurnExport
   lines.push('</LightBurnProject>');
 
   return lines.join('\n');
+}
+
+/** Options shared across every sheet of a multi-sheet LightBurn export (no per-sheet size). */
+export type SheetLightBurnExportOptions = Omit<
+  LightBurnExportOptions,
+  'sheetWidth' | 'sheetHeight'
+>;
+
+/**
+ * Export every sheet of a nesting result to its own LightBurn project, each sized by that sheet's
+ * own dimensions (#26). Returns one {@link SheetExportFile} per sheet.
+ */
+export function exportSheetsToLightBurn(
+  result: { sheets: SheetResult[] },
+  options: SheetLightBurnExportOptions = {},
+): SheetExportFile[] {
+  return result.sheets.map((sheet) => ({
+    filename: sheetExportFilename(sheet.sheetIndex, result.sheets.length, 'lbrn2'),
+    content: exportToLightBurn(sheet.placed, {
+      ...options,
+      sheetWidth: sheet.sheetWidth,
+      sheetHeight: sheet.sheetHeight,
+    }),
+  }));
 }
 
 function writePathShape(lines: string[], polygon: Polygon): void {

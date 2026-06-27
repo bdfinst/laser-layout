@@ -1,7 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { exportToSVG } from '$lib/exporters/svg-exporter';
+import { exportToSVG, exportSheetsToSVG } from '$lib/exporters/svg-exporter';
 import { makePlaced } from '../support/parts';
-import type { Part } from '$lib/geometry/types';
+import type { Part, SheetResult } from '$lib/geometry/types';
+
+function sheet(sheetIndex: number, sheetWidth: number, sheetHeight: number): SheetResult {
+  return {
+    sheetIndex,
+    placed: [makePlaced('a', 10, 10, 0, 0)],
+    stripHeight: 0,
+    utilization: 0,
+    sheetWidth,
+    sheetHeight,
+  };
+}
 
 describe('exportToSVG', () => {
   it('generates valid SVG with xml declaration', () => {
@@ -102,5 +113,25 @@ describe('exportToSVG', () => {
       sheetHeight: 100,
     });
     expect((svg.match(/<path/g) ?? []).length).toBe(2);
+  });
+});
+
+describe('exportSheetsToSVG', () => {
+  it('sizes each sheet of a mixed-size result by its own dimensions', () => {
+    const files = exportSheetsToSVG({ sheets: [sheet(0, 600, 350), sheet(1, 500, 400)] });
+
+    expect(files).toHaveLength(2);
+    expect(files[0].content).toContain('viewBox="0 0 600 350"');
+    expect(files[0].content).toContain('width="600mm" height="350mm"');
+    expect(files[1].content).toContain('viewBox="0 0 500 400"');
+    expect(files[1].content).toContain('width="500mm" height="400mm"');
+  });
+
+  it('keeps a single-size result at its own dimensions', () => {
+    const files = exportSheetsToSVG({ sheets: [sheet(0, 600, 350)] });
+
+    expect(files).toHaveLength(1);
+    expect(files[0].content).toContain('viewBox="0 0 600 350"');
+    expect(files[0].filename).toBe('nested-layout.svg');
   });
 });
